@@ -1,12 +1,16 @@
 const CACHE_NAME = 'color-decoder-v1';
+
+// Determine base path dynamically so it works on any subdirectory (e.g. GitHub Pages)
+const BASE = self.location.pathname.replace(/\/sw\.js$/, '');
+
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/style.css',
-  '/app.js',
-  '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png'
+  BASE + '/',
+  BASE + '/index.html',
+  BASE + '/style.css',
+  BASE + '/app.js',
+  BASE + '/manifest.json',
+  BASE + '/icons/icon-192.png',
+  BASE + '/icons/icon-512.png'
 ];
 
 self.addEventListener('install', e => {
