@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#F4A261" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Decoder" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="manifest" href="manifest.json" />
+  <title>Color Decoder</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- HOME SCREEN -->
+  <div id="home-screen" class="screen active">
+    <div class="color-preview"></div>
+    <h1 class="app-title">Color<span>Decoder</span></h1>
+    <p class="app-subtitle">Crack the secret color code</p>
+    <button id="btn-play" class="btn-primary">Play</button>
+  </div>
+
+  <!-- LEVEL SELECT SCREEN -->
+  <div id="level-screen" class="screen">
+    <div class="screen-header">
+      <button id="btn-back-levels" class="btn-back">←</button>
+      <h2>Select Level</h2>
+    </div>
+    <div id="levels-grid" class="levels-grid"></div>
+  </div>
+
+  <!-- GAME SCREEN -->
+  <div id="game-screen" class="screen">
+    <div class="game-header">
+      <button id="btn-back-game" class="btn-back">←</button>
+      <div class="game-info">
+        <span id="game-level-label" class="game-level"></span>
+        <span id="game-attempts" class="game-attempts"></span>
+      </div>
+    </div>
+
+    <div id="history-area" class="history-area"></div>
+
+    <div id="active-row" class="active-row"></div>
+
+    <div class="palette-area">
+      <div class="palette-label">Choose a color, then tap a slot</div>
+      <div id="palette-row" class="palette-row"></div>
+    </div>
+
+    <button id="btn-confirm" class="btn-confirm" disabled>Confirm Guess</button>
+  </div>
+
+  <!-- RESULT SCREEN -->
+  <div id="result-screen" class="screen">
+    <div class="result-emoji" id="result-emoji"></div>
+    <h2 class="result-title" id="result-title"></h2>
+    <p class="result-subtitle" id="result-subtitle"></p>
+    <div class="result-answer" id="result-answer"></div>
+    <div class="result-buttons">
+      <button id="btn-next" class="btn-primary"></button>
+      <button id="btn-levels" class="btn-secondary">All Levels</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
