@@ -1,4 +1,4 @@
-const CACHE_NAME = 'color-decoder-v1';
+const CACHE_NAME = 'color-decoder-v3';
 
 // Determine base path dynamically so it works on any subdirectory (e.g. GitHub Pages)
 const BASE = self.location.pathname.replace(/\/sw\.js$/, '');
