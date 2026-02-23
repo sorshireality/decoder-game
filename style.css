@@ -372,6 +372,57 @@ html, body {
 }
 .game-attempts .attempts-num { color: var(--accent); }
 
+.pvp-competition-card {
+  min-width: 132px;
+  max-width: 150px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 7px 8px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.pvp-track-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pvp-track-name {
+  width: 34px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+
+.pvp-track-dots {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.pvp-track-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #e2e2e2;
+  border: 1px solid rgba(0,0,0,0.04);
+}
+
+.pvp-track-dot.current {
+  background: var(--accent);
+}
+
+.pvp-track-dot.done {
+  background: #6CC87A;
+}
+
 /* history */
 .history-area {
   flex: 1;
@@ -531,6 +582,30 @@ html, body {
   box-shadow: none;
 }
 .btn-confirm:not(:disabled):active { transform: scale(0.97); }
+
+.pvp-leave-btn {
+  margin-top: 8px;
+  width: 100%;
+}
+
+/* ---- PVP ROUND SCREEN ---- */
+#pvp-round-screen {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.pvp-round-card {
+  width: 100%;
+  max-width: 320px;
+  border: 1.5px solid var(--border);
+  border-radius: 18px;
+  padding: 18px 14px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 
 /* ---- RESULT SCREEN ---- */
 #result-screen {

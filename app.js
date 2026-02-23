@@ -134,6 +134,15 @@ let pvpState = {
   bestOf: null,
   colorsCount: null,
   localRoundStarted: false,
+  pendingRoundResult: null,
+  finalResult: null,
+};
+let pvpMatch = {
+  hostWins: 0,
+  guestWins: 0,
+  hostCorrectCount: 0,
+  guestCorrectCount: 0,
+  roundStatus: 'waiting',
 };
 let supabaseClient = null;
 let supabaseClientCfgKey = '';
@@ -346,6 +355,7 @@ function getPvpLevelFromRoom(room) {
 function maybeStartLocalPvpRound(room) {
   if (!room || room.status !== 'ready') return;
   if (pvpState.localRoundStarted) return;
+  if (pvpState.pendingRoundResult || pvpState.finalResult) return;
   const lvl = getPvpLevelFromRoom(room);
   if (!lvl) {
     showToast('No matching level preset for room settings', 3000);
@@ -357,6 +367,7 @@ function maybeStartLocalPvpRound(room) {
 }
 
 function applyRoomToPvpState(room, roleOverride = null) {
+  const prevStatus = pvpState.status;
   pvpState.roomId = room.id;
   pvpState.roomCode = room.room_code;
   pvpState.status = room.status;
@@ -365,6 +376,7 @@ function applyRoomToPvpState(room, roleOverride = null) {
   pvpState.colorsCount = room.colors_count;
   if (roleOverride) pvpState.role = roleOverride;
   savePvpSession();
+  updatePvpCompetitionUi();
   renderPvpStatus({
     roomCode: room.room_code,
     role: pvpState.role,
@@ -373,6 +385,13 @@ function applyRoomToPvpState(room, roleOverride = null) {
     bestOf: room.best_of,
     colorsCount: room.colors_count,
   });
+  if (room.status === 'abandoned' && prevStatus && prevStatus !== 'abandoned') {
+    showToast('Room closed', 2500);
+    resetPvpStateLocal();
+    document.getElementById('pvp-room-status').style.display = 'none';
+    if (currentScreen !== 'home-screen') showScreen('pvp-screen');
+    return;
+  }
   maybeStartLocalPvpRound(room);
 }
 
@@ -389,6 +408,7 @@ async function refreshPvpRoom() {
   try {
     const room = await fetchRoomById(pvpState.roomId);
     applyRoomToPvpState(room);
+    await refreshPvpMatchState();
   } catch (_) {}
 }
 
@@ -408,6 +428,15 @@ async function watchPvpRoom(roomId) {
         const room = payload.new || payload.old;
         if (room && payload.eventType !== 'DELETE') applyRoomToPvpState(room);
       })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'match_state',
+        filter: `room_id=eq.${roomId}`,
+      }, payload => {
+        const row = payload.new || payload.old;
+        if (row && payload.eventType !== 'DELETE') applyMatchStateToPvp(row);
+      })
       .subscribe();
   } catch (_) {
     pvpRoomChannel = null;
@@ -416,6 +445,258 @@ async function watchPvpRoom(roomId) {
   // Polling fallback (also useful if Realtime is not enabled yet)
   pvpPollTimer = setInterval(refreshPvpRoom, 2500);
   await refreshPvpRoom();
+}
+
+function isPvpModeActive() {
+  return !!pvpState.roomId;
+}
+
+function isPvpRoleHost() {
+  return pvpState.role === 'host';
+}
+
+function getPvpWinsNeeded() {
+  const bestOf = Number(pvpState.bestOf || 1);
+  return Math.floor(bestOf / 2) + 1;
+}
+
+function getMyPvpWins() {
+  return isPvpRoleHost() ? pvpMatch.hostWins : pvpMatch.guestWins;
+}
+
+function getOpponentPvpWins() {
+  return isPvpRoleHost() ? pvpMatch.guestWins : pvpMatch.hostWins;
+}
+
+function getMyPvpCorrectCount() {
+  return isPvpRoleHost() ? pvpMatch.hostCorrectCount : pvpMatch.guestCorrectCount;
+}
+
+function getOpponentPvpCorrectCount() {
+  return isPvpRoleHost() ? pvpMatch.guestCorrectCount : pvpMatch.hostCorrectCount;
+}
+
+function renderPvpTrackDots(targetEl, wins, winsNeeded) {
+  targetEl.innerHTML = '';
+  for (let i = 0; i < winsNeeded; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'pvp-track-dot';
+    if (i < wins) dot.classList.add('done');
+    else if (i === wins && wins < winsNeeded) dot.classList.add('current');
+    targetEl.appendChild(dot);
+  }
+}
+
+function updatePvpCompetitionUi() {
+  const card = document.getElementById('pvp-competition-card');
+  const leaveBtn = document.getElementById('btn-pvp-leave');
+  if (!isPvpModeActive() || !pvpState.bestOf) {
+    card.style.display = 'none';
+    leaveBtn.style.display = 'none';
+    return;
+  }
+
+  card.style.display = '';
+  leaveBtn.style.display = '';
+
+  const winsNeeded = getPvpWinsNeeded();
+  const myWins = getMyPvpWins();
+  const oppWins = getOpponentPvpWins();
+  const myLabel = isPvpRoleHost() ? 'Host' : 'Guest';
+  const oppLabel = isPvpRoleHost() ? 'Guest' : 'Host';
+  document.getElementById('pvp-you-label').textContent = myLabel;
+  document.getElementById('pvp-opp-label').textContent = oppLabel;
+
+  renderPvpTrackDots(document.getElementById('pvp-you-track'), myWins, winsNeeded);
+  renderPvpTrackDots(document.getElementById('pvp-opp-track'), oppWins, winsNeeded);
+}
+
+function hidePvpRoundScreen() {
+  if (currentScreen === 'pvp-round-screen') showScreen('game-screen');
+}
+
+function showPvpRoundScreen(kind) {
+  const title = document.getElementById('pvp-round-title');
+  const subtitle = document.getElementById('pvp-round-subtitle');
+  const emoji = document.getElementById('pvp-round-emoji');
+  const nextBtn = document.getElementById('btn-pvp-round-next');
+
+  if (kind === 'won') {
+    emoji.textContent = '✅';
+    title.textContent = 'Round cleared';
+    subtitle.textContent = `Score ${getMyPvpWins()}-${getOpponentPvpWins()} • Opp ${getOpponentPvpCorrectCount()}/${pvpState.colorsCount || '-'}`;
+    nextBtn.textContent = 'Next';
+    nextBtn.style.display = '';
+  } else {
+    emoji.textContent = '❌';
+    title.textContent = 'Round failed';
+    subtitle.textContent = 'Retry same round fast';
+    nextBtn.textContent = 'Retry';
+    nextBtn.style.display = '';
+  }
+  showScreen('pvp-round-screen');
+}
+
+function showPvpFinalResult(won) {
+  pvpState.finalResult = won ? 'win' : 'lose';
+  document.getElementById('result-emoji').textContent = won ? '🏆' : '😞';
+  document.getElementById('result-title').textContent = won ? 'Victory' : 'Defeat';
+  document.getElementById('result-subtitle').textContent =
+    `Final score ${getMyPvpWins()}-${getOpponentPvpWins()}`;
+  document.getElementById('result-answer').innerHTML = '';
+  document.getElementById('btn-next').style.display = 'none';
+  document.getElementById('btn-levels').textContent = 'Back to PVP';
+  showScreen('result-screen');
+}
+
+function resetPvpStateLocal() {
+  stopPvpWatchers();
+  pvpState = {
+    roomId: null,
+    roomCode: null,
+    role: null,
+    status: null,
+    mode: null,
+    bestOf: null,
+    colorsCount: null,
+    localRoundStarted: false,
+    pendingRoundResult: null,
+    finalResult: null,
+  };
+  pvpMatch = {
+    hostWins: 0,
+    guestWins: 0,
+    hostCorrectCount: 0,
+    guestCorrectCount: 0,
+    roundStatus: 'waiting',
+  };
+  localStorage.removeItem(STORAGE_KEYS.pvpSession);
+  document.getElementById('btn-next').style.display = '';
+  updatePvpCompetitionUi();
+}
+
+async function leavePvpSession(options = {}) {
+  const { fromMatchEnd = false } = options;
+  if (!pvpState.roomId) {
+    resetPvpStateLocal();
+    return;
+  }
+  try {
+    await ensurePvpConfigReady();
+    const sb = getSupabaseClient();
+
+    if (isPvpRoleHost()) {
+      await sb.from('rooms')
+        .update({ status: fromMatchEnd ? 'match_finished' : 'abandoned' })
+        .eq('id', pvpState.roomId);
+    } else {
+      await sb.from('rooms')
+        .update({
+          guest_player_id: null,
+          status: fromMatchEnd ? 'match_finished' : 'waiting_for_opponent',
+        })
+        .eq('id', pvpState.roomId);
+
+      await sb.from('room_players')
+        .delete()
+        .eq('room_id', pvpState.roomId)
+        .eq('player_id', getGuestPlayerId());
+    }
+  } catch (_) {
+    // still clear local state to avoid trapping the user
+  }
+  resetPvpStateLocal();
+}
+
+async function fetchMatchStateByRoomId(roomId) {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb.from('match_state').select('*').eq('room_id', roomId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+function applyMatchStateToPvp(matchState) {
+  if (!matchState) return;
+  pvpMatch.hostWins = matchState.host_round_wins || 0;
+  pvpMatch.guestWins = matchState.guest_round_wins || 0;
+  pvpMatch.hostCorrectCount = matchState.host_correct_count || 0;
+  pvpMatch.guestCorrectCount = matchState.guest_correct_count || 0;
+  pvpMatch.roundStatus = matchState.round_status || 'waiting';
+  updatePvpCompetitionUi();
+
+  if (!isPvpModeActive()) return;
+  const winsNeeded = getPvpWinsNeeded();
+  if (!pvpState.finalResult) {
+    if (getMyPvpWins() >= winsNeeded) showPvpFinalResult(true);
+    else if (getOpponentPvpWins() >= winsNeeded) showPvpFinalResult(false);
+  }
+}
+
+async function refreshPvpMatchState() {
+  if (!pvpState.roomId) return;
+  try {
+    const matchState = await fetchMatchStateByRoomId(pvpState.roomId);
+    applyMatchStateToPvp(matchState);
+  } catch (_) {}
+}
+
+async function updatePvpCorrectProgress(correctCount) {
+  if (!isPvpModeActive() || !pvpState.roomId) return;
+  try {
+    const sb = getSupabaseClient();
+    const field = isPvpRoleHost() ? 'host_correct_count' : 'guest_correct_count';
+    await sb.from('match_state').update({ [field]: correctCount }).eq('room_id', pvpState.roomId);
+    if (isPvpRoleHost()) pvpMatch.hostCorrectCount = correctCount;
+    else pvpMatch.guestCorrectCount = correctCount;
+    updatePvpCompetitionUi();
+  } catch (_) {}
+}
+
+async function addPvpWinAndAdvance() {
+  if (!isPvpModeActive()) return;
+  const sb = getSupabaseClient();
+  const matchState = await fetchMatchStateByRoomId(pvpState.roomId);
+  if (!matchState) throw new Error('Missing match_state');
+
+  const myWinField = isPvpRoleHost() ? 'host_round_wins' : 'guest_round_wins';
+  const myCorrectField = isPvpRoleHost() ? 'host_correct_count' : 'guest_correct_count';
+  const nextWins = (matchState[myWinField] || 0) + 1;
+  const winsNeeded = getPvpWinsNeeded();
+
+  const patch = {
+    [myWinField]: nextWins,
+    [myCorrectField]: 0,
+    round_status: nextWins >= winsNeeded ? 'finished' : 'waiting',
+  };
+
+  const { error } = await sb.from('match_state').update(patch).eq('room_id', pvpState.roomId);
+  if (error) throw new Error(error.message);
+
+  await refreshPvpMatchState();
+  if (nextWins >= winsNeeded) {
+    await sb.from('rooms').update({ status: 'match_finished' }).eq('id', pvpState.roomId);
+    pvpState.status = 'match_finished';
+    showPvpFinalResult(true);
+    return;
+  }
+
+  pvpState.localRoundStarted = false;
+  pvpState.pendingRoundResult = 'won';
+  showPvpRoundScreen('won');
+}
+
+function restartCurrentPvpRoundFast() {
+  pvpState.localRoundStarted = false;
+  pvpState.pendingRoundResult = null;
+  const lvl = getPvpLevelFromRoom({
+    mode: pvpState.mode,
+    colors_count: pvpState.colorsCount,
+  });
+  if (lvl) {
+    startLevel(lvl);
+    pvpState.localRoundStarted = true;
+    updatePvpCorrectProgress(0);
+  }
 }
 
 async function restorePvpSessionIfAny() {
@@ -436,6 +717,7 @@ async function restorePvpSessionIfAny() {
 function renderPvpStatus(info) {
   const box = document.getElementById('pvp-room-status');
   box.style.display = '';
+  const winsNeeded = pvpState.bestOf ? getPvpWinsNeeded() : null;
   box.innerHTML = `
     <h3 class="pvp-panel-title">Room Status</h3>
     <div class="pvp-status-line"><span class="pvp-status-label">Room Code</span><span class="pvp-status-value">${info.roomCode || '-'}</span></div>
@@ -444,7 +726,17 @@ function renderPvpStatus(info) {
     <div class="pvp-status-line"><span class="pvp-status-label">Mode</span><span class="pvp-status-value">${info.mode || '-'}</span></div>
     <div class="pvp-status-line"><span class="pvp-status-label">Best Of</span><span class="pvp-status-value">${info.bestOf || '-'}</span></div>
     <div class="pvp-status-line"><span class="pvp-status-label">Colors</span><span class="pvp-status-value">${info.colorsCount || '-'}</span></div>
+    ${winsNeeded ? `<div class="pvp-status-line"><span class="pvp-status-label">Score</span><span class="pvp-status-value">${getMyPvpWins()}-${getOpponentPvpWins()} / ${winsNeeded}</span></div>` : ''}
+    <button id="btn-pvp-leave-lobby" class="btn-secondary pvp-btn">${isPvpRoleHost() ? 'Close Room' : 'Leave Room'}</button>
   `;
+  const leaveLobbyBtn = document.getElementById('btn-pvp-leave-lobby');
+  if (leaveLobbyBtn) {
+    leaveLobbyBtn.addEventListener('click', async () => {
+      await leavePvpSession();
+      showScreen('pvp-screen');
+      document.getElementById('pvp-room-status').style.display = 'none';
+    });
+  }
 }
 
 // ---- LANG ----
@@ -733,8 +1025,12 @@ function startLevel(lvl) {
   state.attemptsLeft      = cfg.attempts;
   state.selectedColor     = null;
   state.gameOver          = false;
-  state.abilityAvailable  = state.hasAbility;
+  state.abilityAvailable  = isPvpModeActive() ? false : state.hasAbility;
   state.revealedPositions = [];
+  if (isPvpModeActive()) {
+    pvpState.localRoundStarted = true;
+    pvpState.pendingRoundResult = null;
+  }
 
   renderGame();
   showScreen('game-screen');
@@ -754,6 +1050,7 @@ function renderGame() {
   renderPalette(cfg.paletteColors);
   updateConfirmBtn();
   updateAbilityBtn();
+  updatePvpCompetitionUi();
 }
 
 function renderHistory() {
@@ -841,6 +1138,7 @@ function updateConfirmBtn() {
 
 function updateAbilityBtn() {
   const btn = document.getElementById('btn-ability');
+  if (isPvpModeActive()) { btn.style.display = 'none'; return; }
   if (!state.hasAbility) { btn.style.display = 'none'; return; }
   btn.style.display = '';
   btn.disabled = !state.abilityAvailable || state.gameOver;
@@ -867,7 +1165,7 @@ function useAbility() {
   showToast(t('positionRevealed'));
 }
 
-function onConfirm() {
+async function onConfirm() {
   if (state.gameOver) return;
   const cfg = LEVELS[state.currentLevel - 1];
   if (state.guess.some(c => c === null)) return;
@@ -875,9 +1173,37 @@ function onConfirm() {
   const correct = countCorrect(state.secret, state.guess);
   state.history.push({ guess: [...state.guess], correct });
   state.attemptsLeft--;
+  if (isPvpModeActive()) updatePvpCorrectProgress(correct);
 
   const won = correct === cfg.colors;
   const lost = !won && state.attemptsLeft === 0;
+
+  if (isPvpModeActive()) {
+    if (won || lost) {
+      state.gameOver = true;
+      state.guess = new Array(cfg.colors).fill(null);
+      renderGame();
+      setTimeout(async () => {
+        if (won) {
+          try {
+            await addPvpWinAndAdvance();
+          } catch (err) {
+            showToast(err.message || 'PVP progress update failed', 3000);
+          }
+        } else {
+          await updatePvpCorrectProgress(0);
+          pvpState.pendingRoundResult = 'lost';
+          showPvpRoundScreen('lost');
+        }
+      }, 250);
+      return;
+    }
+
+    state.guess = new Array(cfg.colors).fill(null);
+    state.selectedColor = null;
+    renderGame();
+    return;
+  }
 
   if (won || lost) {
     state.gameOver = true;
@@ -934,6 +1260,7 @@ function showResult(won) {
   });
 
   const nextBtn = document.getElementById('btn-next');
+  nextBtn.style.display = '';
   if (won && state.currentLevel < LEVELS.length) {
     nextBtn.textContent = t('nextLevel');
   } else if (won) {
@@ -956,15 +1283,37 @@ function init() {
 
   document.getElementById('btn-back-levels').addEventListener('click', () => showScreen('home-screen'));
   document.getElementById('btn-back-pvp').addEventListener('click', () => showScreen('home-screen'));
-  document.getElementById('btn-back-game').addEventListener('click', () => {
+  document.getElementById('btn-back-game').addEventListener('click', async () => {
+    if (isPvpModeActive()) {
+      await leavePvpSession();
+      document.getElementById('pvp-room-status').style.display = 'none';
+      showScreen('pvp-screen');
+      return;
+    }
     renderLevelSelect();
     showScreen('level-screen');
   });
 
   document.getElementById('btn-confirm').addEventListener('click', onConfirm);
   document.getElementById('btn-ability').addEventListener('click', useAbility);
+  document.getElementById('btn-pvp-leave').addEventListener('click', async () => {
+    await leavePvpSession();
+    document.getElementById('pvp-room-status').style.display = 'none';
+    showScreen('pvp-screen');
+  });
+
+  document.getElementById('btn-pvp-round-next').addEventListener('click', () => {
+    hidePvpRoundScreen();
+    restartCurrentPvpRoundFast();
+  });
+  document.getElementById('btn-pvp-round-back').addEventListener('click', async () => {
+    await leavePvpSession();
+    document.getElementById('pvp-room-status').style.display = 'none';
+    showScreen('pvp-screen');
+  });
 
   document.getElementById('btn-next').addEventListener('click', () => {
+    if (pvpState.finalResult) return;
     const cfg = LEVELS[state.currentLevel - 1];
     const won = state.history.length > 0 &&
       state.history[state.history.length - 1].correct === cfg.colors;
@@ -975,7 +1324,13 @@ function init() {
     }
   });
 
-  document.getElementById('btn-levels').addEventListener('click', () => {
+  document.getElementById('btn-levels').addEventListener('click', async () => {
+    if (pvpState.finalResult) {
+      await leavePvpSession({ fromMatchEnd: true });
+      document.getElementById('pvp-room-status').style.display = 'none';
+      showScreen('pvp-screen');
+      return;
+    }
     renderLevelSelect();
     showScreen('level-screen');
   });

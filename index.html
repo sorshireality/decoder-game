@@ -97,6 +97,16 @@
         <span id="game-level-label" class="game-level"></span>
         <span id="game-attempts" class="game-attempts"></span>
       </div>
+      <div id="pvp-competition-card" class="pvp-competition-card" style="display:none">
+        <div class="pvp-track-row">
+          <span id="pvp-you-label" class="pvp-track-name">You</span>
+          <div id="pvp-you-track" class="pvp-track-dots"></div>
+        </div>
+        <div class="pvp-track-row">
+          <span id="pvp-opp-label" class="pvp-track-name">Guest</span>
+          <div id="pvp-opp-track" class="pvp-track-dots"></div>
+        </div>
+      </div>
     </div>
 
     <div id="history-area" class="history-area"></div>
@@ -110,6 +120,18 @@
 
     <button id="btn-ability" class="btn-ability" style="display:none"></button>
     <button id="btn-confirm" class="btn-confirm" disabled></button>
+    <button id="btn-pvp-leave" class="btn-secondary pvp-leave-btn" style="display:none">Leave PVP</button>
+  </div>
+
+  <!-- PVP ROUND SCREEN -->
+  <div id="pvp-round-screen" class="screen">
+    <div class="pvp-round-card">
+      <div id="pvp-round-emoji" class="result-emoji">✅</div>
+      <h2 id="pvp-round-title" class="result-title">Round cleared</h2>
+      <p id="pvp-round-subtitle" class="result-subtitle">Keep going</p>
+      <button id="btn-pvp-round-next" class="btn-primary">Next</button>
+      <button id="btn-pvp-round-back" class="btn-secondary">Back to PVP</button>
+    </div>
   </div>
 
   <!-- RESULT SCREEN -->
