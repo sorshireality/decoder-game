@@ -20,7 +20,64 @@
     <div class="color-preview"></div>
     <h1 class="app-title">Color<span>Decoder</span></h1>
     <p id="app-subtitle" class="app-subtitle"></p>
-    <button id="btn-play" class="btn-primary"></button>
+    <div class="home-actions">
+      <button id="btn-play" class="btn-primary"></button>
+      <button id="btn-pvp" class="btn-secondary home-secondary-btn">PVP (MVP)</button>
+    </div>
+  </div>
+
+  <!-- PVP LOBBY SCREEN -->
+  <div id="pvp-screen" class="screen">
+    <div class="screen-header">
+      <button id="btn-back-pvp" class="btn-back">←</button>
+      <h2 id="pvp-title">PVP</h2>
+    </div>
+
+    <div class="pvp-panel">
+      <h3 class="pvp-panel-title">Connection</h3>
+      <div id="pvp-connection-status" class="pvp-connection-status">Connecting…</div>
+      <div id="pvp-guest-id" class="pvp-meta"></div>
+      <button id="btn-toggle-dev-config" class="btn-secondary pvp-dev-toggle" type="button">Dev Config (fallback)</button>
+      <div id="pvp-dev-config" class="pvp-dev-config" style="display:none">
+        <input id="supabase-url" class="input-control" type="url" placeholder="Supabase URL" />
+        <input id="supabase-anon-key" class="input-control" type="text" placeholder="Supabase anon key" />
+        <button id="btn-save-supabase" class="btn-secondary">Save Dev Config</button>
+      </div>
+    </div>
+
+    <div class="pvp-panel">
+      <h3 class="pvp-panel-title">Create Room (Host)</h3>
+      <label class="pvp-label" for="pvp-mode">Mode</label>
+      <select id="pvp-mode" class="input-control">
+        <option value="classic">Classic</option>
+        <option value="plus_one">+1 Decoy</option>
+      </select>
+
+      <label class="pvp-label" for="pvp-colors">Colors</label>
+      <select id="pvp-colors" class="input-control">
+        <option value="3">3</option>
+        <option value="4" selected>4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+      </select>
+
+      <label class="pvp-label" for="pvp-bestof">Best Of</label>
+      <select id="pvp-bestof" class="input-control">
+        <option value="1">Best of 1</option>
+        <option value="3" selected>Best of 3</option>
+        <option value="5">Best of 5</option>
+      </select>
+
+      <button id="btn-create-room" class="btn-primary pvp-btn">Create Room</button>
+    </div>
+
+    <div class="pvp-panel">
+      <h3 class="pvp-panel-title">Join Room</h3>
+      <input id="pvp-room-code" class="input-control code-input" type="text" maxlength="6" placeholder="ROOM CODE" />
+      <button id="btn-join-room" class="btn-secondary pvp-btn">Join by Code</button>
+    </div>
+
+    <div id="pvp-room-status" class="pvp-panel pvp-status" style="display:none"></div>
   </div>
 
   <!-- LEVEL SELECT SCREEN -->
@@ -69,6 +126,7 @@
 
   <div id="toast" class="toast"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -34,12 +34,19 @@ const LEVELS = [
 
 const ABILITY_UNLOCK_LEVEL = 6;
 const STAGE1_COUNT = 10;
+const STORAGE_KEYS = {
+  progress: 'decoder_progress',
+  guestId: 'decoder_guest_id',
+  supabaseCfg: 'decoder_supabase_cfg',
+};
+const VERCEL_CONFIG_ENDPOINT = '/api/config';
 
 // ---- I18N ----
 const I18N = {
   en: {
     appSubtitle:      'Crack the secret color code',
     play:             'Play',
+    pvp:              'PVP',
     selectLevel:      'Select Level',
     stageName:        n => `Stage ${n}`,
     stage2desc:       'Palette has one decoy color',
@@ -67,6 +74,7 @@ const I18N = {
   uk: {
     appSubtitle:      'Розгадай таємний колірний код',
     play:             'Грати',
+    pvp:              'PVP',
     selectLevel:      'Вибір рівня',
     stageName:        n => `Стадія ${n}`,
     stage2desc:       'У палітрі є один зайвий колір',
@@ -116,10 +124,19 @@ let state = {
 };
 
 let currentScreen = 'home-screen';
+let pvpState = {
+  roomId: null,
+  roomCode: null,
+  role: null,
+  status: null,
+};
+let supabaseClient = null;
+let supabaseClientCfgKey = '';
+let pvpInitPromise = null;
 
 // ---- STORAGE ----
 function saveProgress() {
-  localStorage.setItem('decoder_progress', JSON.stringify({
+  localStorage.setItem(STORAGE_KEYS.progress, JSON.stringify({
     unlockedLevel: state.unlockedLevel,
     hasAbility:    state.hasAbility,
     lang,
@@ -128,7 +145,7 @@ function saveProgress() {
 
 function loadProgress() {
   try {
-    const d = JSON.parse(localStorage.getItem('decoder_progress'));
+    const d = JSON.parse(localStorage.getItem(STORAGE_KEYS.progress));
     if (d) {
       if (d.unlockedLevel) {
         state.unlockedLevel = Math.min(d.unlockedLevel, LEVELS.length);
@@ -182,11 +199,126 @@ function showScreen(id) {
   currentScreen = id;
 }
 
+function getGuestPlayerId() {
+  let id = localStorage.getItem(STORAGE_KEYS.guestId);
+  if (!id) {
+    id = `guest_${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(STORAGE_KEYS.guestId, id);
+  }
+  return id;
+}
+
+function saveSupabaseConfigFromForm() {
+  const url = document.getElementById('supabase-url').value.trim();
+  const anonKey = document.getElementById('supabase-anon-key').value.trim();
+  localStorage.setItem(STORAGE_KEYS.supabaseCfg, JSON.stringify({ url, anonKey }));
+  supabaseClient = null;
+  supabaseClientCfgKey = '';
+  setPvpConnectionStatus('Using local dev config', 'warn');
+  showToast('Supabase config saved');
+}
+
+function loadSupabaseConfigToForm() {
+  try {
+    const cfg = JSON.parse(localStorage.getItem(STORAGE_KEYS.supabaseCfg) || '{}');
+    document.getElementById('supabase-url').value = cfg.url || '';
+    document.getElementById('supabase-anon-key').value = cfg.anonKey || '';
+  } catch (_) {}
+}
+
+function getSupabaseClient() {
+  const cfg = JSON.parse(localStorage.getItem(STORAGE_KEYS.supabaseCfg) || '{}');
+  if (!cfg.url || !cfg.anonKey) {
+    throw new Error('Missing Supabase URL or anon key');
+  }
+  const cacheKey = `${cfg.url}|${cfg.anonKey}`;
+  if (supabaseClient && supabaseClientCfgKey === cacheKey) return supabaseClient;
+  if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+    throw new Error('Supabase CDN not loaded');
+  }
+  supabaseClient = window.supabase.createClient(cfg.url, cfg.anonKey);
+  supabaseClientCfgKey = cacheKey;
+  return supabaseClient;
+}
+
+function setPvpConnectionStatus(text, tone = '') {
+  const el = document.getElementById('pvp-connection-status');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.remove('ok', 'warn');
+  if (tone) el.classList.add(tone);
+}
+
+function togglePvpDevConfig() {
+  const panel = document.getElementById('pvp-dev-config');
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : '';
+}
+
+async function tryLoadSupabaseConfigFromServer() {
+  const res = await fetch(VERCEL_CONFIG_ENDPOINT, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Config endpoint failed (${res.status})`);
+  const data = await res.json();
+  if (!data || !data.supabaseUrl || !data.supabaseAnonKey) {
+    throw new Error('Invalid config payload');
+  }
+  localStorage.setItem(STORAGE_KEYS.supabaseCfg, JSON.stringify({
+    url: data.supabaseUrl,
+    anonKey: data.supabaseAnonKey,
+  }));
+  supabaseClient = null;
+  supabaseClientCfgKey = '';
+  loadSupabaseConfigToForm();
+}
+
+async function ensurePvpConfigReady() {
+  try {
+    setPvpConnectionStatus('Connecting to backend config…');
+    await tryLoadSupabaseConfigFromServer();
+    getSupabaseClient();
+    setPvpConnectionStatus('Connected via Vercel config', 'ok');
+    return true;
+  } catch (_) {
+    try {
+      loadSupabaseConfigToForm();
+      getSupabaseClient();
+      setPvpConnectionStatus('Using local dev config (fallback)', 'warn');
+      return true;
+    } catch (fallbackErr) {
+      setPvpConnectionStatus('No backend config. Open Dev Config (fallback).', 'warn');
+      return false;
+    }
+  }
+}
+
+function randomRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+function renderPvpStatus(info) {
+  const box = document.getElementById('pvp-room-status');
+  box.style.display = '';
+  box.innerHTML = `
+    <h3 class="pvp-panel-title">Room Status</h3>
+    <div class="pvp-status-line"><span class="pvp-status-label">Room Code</span><span class="pvp-status-value">${info.roomCode || '-'}</span></div>
+    <div class="pvp-status-line"><span class="pvp-status-label">Role</span><span class="pvp-status-value">${info.role || '-'}</span></div>
+    <div class="pvp-status-line"><span class="pvp-status-label">Status</span><span class="pvp-status-value">${info.status || '-'}</span></div>
+    <div class="pvp-status-line"><span class="pvp-status-label">Mode</span><span class="pvp-status-value">${info.mode || '-'}</span></div>
+    <div class="pvp-status-line"><span class="pvp-status-label">Best Of</span><span class="pvp-status-value">${info.bestOf || '-'}</span></div>
+    <div class="pvp-status-line"><span class="pvp-status-label">Colors</span><span class="pvp-status-value">${info.colorsCount || '-'}</span></div>
+  `;
+}
+
 // ---- LANG ----
 function applyLang() {
   document.documentElement.lang = lang;
   document.getElementById('app-subtitle').textContent = t('appSubtitle');
   document.getElementById('btn-play').textContent = t('play');
+  const pvpBtn = document.getElementById('btn-pvp');
+  if (pvpBtn) pvpBtn.textContent = `${t('pvp')} (MVP)`;
   document.getElementById('lang-toggle').textContent = lang === 'uk' ? 'EN' : 'UA';
 }
 
@@ -229,7 +361,161 @@ function initHome() {
     showScreen('level-screen');
   });
 
+  document.getElementById('btn-pvp').addEventListener('click', () => {
+    showScreen('pvp-screen');
+  });
+
   document.getElementById('lang-toggle').addEventListener('click', toggleLang);
+}
+
+// ---- PVP MVP (Supabase + Room Code) ----
+function getPvpSettingsFromForm() {
+  return {
+    mode: document.getElementById('pvp-mode').value,
+    bestOf: Number(document.getElementById('pvp-bestof').value),
+    colorsCount: Number(document.getElementById('pvp-colors').value),
+  };
+}
+
+async function createRoomMvp() {
+  await ensurePvpConfigReady();
+  const guestId = getGuestPlayerId();
+  const { mode, bestOf, colorsCount } = getPvpSettingsFromForm();
+  const sb = getSupabaseClient();
+
+  let room = null;
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 5 && !room; attempt++) {
+    const roomCode = randomRoomCode();
+    const { data, error } = await sb
+      .from('rooms')
+      .insert({
+        room_code: roomCode,
+        status: 'waiting_for_opponent',
+        mode,
+        best_of: bestOf,
+        colors_count: colorsCount,
+        host_player_id: guestId,
+      })
+      .select()
+      .single();
+
+    if (!error) room = data;
+    else lastError = error;
+  }
+
+  if (!room) throw new Error(lastError?.message || 'Failed to create room');
+
+  const paletteSize = mode === 'plus_one' ? colorsCount + 1 : colorsCount;
+
+  const hostPlayerRes = await sb.from('room_players').insert({
+    room_id: room.id,
+    player_id: guestId,
+    role: 'host',
+    connection_status: 'connected',
+  });
+  if (hostPlayerRes.error) throw new Error(hostPlayerRes.error.message);
+
+  const matchStateRes = await sb.from('match_state').insert({
+    room_id: room.id,
+    current_round: 1,
+    host_round_wins: 0,
+    guest_round_wins: 0,
+    host_correct_count: 0,
+    guest_correct_count: 0,
+    round_status: 'waiting',
+    secret_length: colorsCount,
+    palette_size: paletteSize,
+  });
+  if (matchStateRes.error) throw new Error(matchStateRes.error.message);
+
+  pvpState = { roomId: room.id, roomCode: room.room_code, role: 'host', status: room.status };
+  renderPvpStatus({
+    roomCode: room.room_code,
+    role: 'host',
+    status: room.status,
+    mode: room.mode,
+    bestOf: room.best_of,
+    colorsCount: room.colors_count,
+  });
+  showToast(`Room created: ${room.room_code}`, 3000);
+}
+
+async function joinRoomByCodeMvp() {
+  await ensurePvpConfigReady();
+  const guestId = getGuestPlayerId();
+  const code = document.getElementById('pvp-room-code').value.trim().toUpperCase();
+  if (!code) throw new Error('Enter room code');
+
+  const sb = getSupabaseClient();
+  const { data: room, error: roomErr } = await sb
+    .from('rooms')
+    .select('*')
+    .eq('room_code', code)
+    .maybeSingle();
+
+  if (roomErr) throw new Error(roomErr.message);
+  if (!room) throw new Error('Room not found');
+  if (room.host_player_id === guestId) throw new Error('This device is already the host');
+  if (room.guest_player_id && room.guest_player_id !== guestId) throw new Error('Room already has guest');
+
+  const { error: updateErr } = await sb
+    .from('rooms')
+    .update({
+      guest_player_id: guestId,
+      status: 'ready',
+    })
+    .eq('id', room.id);
+  if (updateErr) throw new Error(updateErr.message);
+
+  const { error: playerErr } = await sb
+    .from('room_players')
+    .upsert({
+      room_id: room.id,
+      player_id: guestId,
+      role: 'guest',
+      connection_status: 'connected',
+    }, { onConflict: 'room_id,player_id' });
+  if (playerErr) throw new Error(playerErr.message);
+
+  pvpState = { roomId: room.id, roomCode: room.room_code, role: 'guest', status: 'ready' };
+  renderPvpStatus({
+    roomCode: room.room_code,
+    role: 'guest',
+    status: 'ready',
+    mode: room.mode,
+    bestOf: room.best_of,
+    colorsCount: room.colors_count,
+  });
+  showToast(`Joined: ${room.room_code}`, 3000);
+}
+
+function initPvpMvp() {
+  document.getElementById('pvp-guest-id').textContent = `Guest ID: ${getGuestPlayerId()}`;
+  loadSupabaseConfigToForm();
+  setPvpConnectionStatus('Checking connection…');
+
+  document.getElementById('btn-save-supabase').addEventListener('click', saveSupabaseConfigFromForm);
+  document.getElementById('btn-toggle-dev-config').addEventListener('click', togglePvpDevConfig);
+
+  document.getElementById('btn-create-room').addEventListener('click', async () => {
+    try {
+      await createRoomMvp();
+    } catch (err) {
+      showToast(err.message || 'Create room failed', 3000);
+    }
+  });
+
+  document.getElementById('btn-join-room').addEventListener('click', async () => {
+    try {
+      await joinRoomByCodeMvp();
+    } catch (err) {
+      showToast(err.message || 'Join room failed', 3000);
+    }
+  });
+
+  pvpInitPromise = ensurePvpConfigReady();
 }
 
 // ---- LEVEL SELECT ----
@@ -523,9 +809,11 @@ function init() {
   loadProgress();
   applyLang();
   initHome();
+  initPvpMvp();
   showScreen('home-screen');
 
   document.getElementById('btn-back-levels').addEventListener('click', () => showScreen('home-screen'));
+  document.getElementById('btn-back-pvp').addEventListener('click', () => showScreen('home-screen'));
   document.getElementById('btn-back-game').addEventListener('click', () => {
     renderLevelSelect();
     showScreen('level-screen');

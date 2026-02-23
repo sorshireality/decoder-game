@@ -45,6 +45,18 @@ html, body {
   text-align: center;
 }
 
+.home-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 280px;
+}
+
+.home-secondary-btn {
+  width: 100%;
+}
+
 .lang-toggle {
   position: absolute;
   top: calc(env(safe-area-inset-top, 16px) + 10px);
@@ -132,6 +144,123 @@ html, body {
 .screen-header h2 {
   font-size: 1.3rem;
   font-weight: 700;
+}
+
+/* ---- PVP SCREEN ---- */
+#pvp-screen {
+  gap: 12px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pvp-panel {
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fff;
+}
+
+.pvp-panel-title {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.pvp-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.input-control {
+  width: 100%;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 11px 12px;
+  font-size: 0.95rem;
+  color: var(--text);
+  background: #fff;
+}
+
+.input-control:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.code-input {
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+}
+
+.pvp-btn {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.pvp-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.pvp-connection-status {
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  background: #f8f8f8;
+  border: 1.5px solid var(--border);
+  color: var(--text);
+}
+
+.pvp-connection-status.ok {
+  border-color: #cde8d2;
+  background: #eefaf0;
+  color: #1f6d35;
+}
+
+.pvp-connection-status.warn {
+  border-color: #f2dfb3;
+  background: #fff8e8;
+  color: #8a6110;
+}
+
+.pvp-dev-toggle {
+  width: 100%;
+}
+
+.pvp-dev-config {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.pvp-status {
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.pvp-status-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pvp-status-label {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.pvp-status-value {
+  font-weight: 700;
+  color: var(--text);
+  text-align: right;
 }
 
 /* scrollable container for stages */
