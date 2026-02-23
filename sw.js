@@ -1,4 +1,4 @@
-const CACHE_NAME = 'color-decoder-v3';
+const CACHE_NAME = 'color-decoder-v4';
 
 // Determine base path dynamically so it works on any subdirectory (e.g. GitHub Pages)
 const BASE = self.location.pathname.replace(/\/sw\.js$/, '');
@@ -30,7 +30,38 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
+  const { request } = e;
+  if (request.method !== 'GET') return;
+
+  const url = new URL(request.url);
+  const isSameOrigin = url.origin === self.location.origin;
+  const isNavigation = request.mode === 'navigate';
+  const isCoreAsset = isSameOrigin && (
+    url.pathname.endsWith('/index.html') ||
+    url.pathname.endsWith('/app.js') ||
+    url.pathname.endsWith('/style.css') ||
+    url.pathname.endsWith('/manifest.json')
+  );
+
+  // Network-first for app shell to avoid stale UI after deploys.
+  if (isNavigation || isCoreAsset) {
+    e.respondWith((async () => {
+      try {
+        const fresh = await fetch(request);
+        const cache = await caches.open(CACHE_NAME);
+        cache.put(request, fresh.clone());
+        return fresh;
+      } catch (_) {
+        const cached = await caches.match(request);
+        if (cached) return cached;
+        throw _;
+      }
+    })());
+    return;
+  }
+
+  // Cache-first for static assets (icons, etc.)
   e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request))
+    caches.match(request).then(cached => cached || fetch(request))
   );
 });

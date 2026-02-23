@@ -38,6 +38,7 @@ const STORAGE_KEYS = {
   progress: 'decoder_progress',
   guestId: 'decoder_guest_id',
   supabaseCfg: 'decoder_supabase_cfg',
+  pvpSession: 'decoder_pvp_session',
 };
 const VERCEL_CONFIG_ENDPOINT = '/api/config';
 
@@ -129,10 +130,16 @@ let pvpState = {
   roomCode: null,
   role: null,
   status: null,
+  mode: null,
+  bestOf: null,
+  colorsCount: null,
+  localRoundStarted: false,
 };
 let supabaseClient = null;
 let supabaseClientCfgKey = '';
 let pvpInitPromise = null;
+let pvpRoomChannel = null;
+let pvpPollTimer = null;
 
 // ---- STORAGE ----
 function saveProgress() {
@@ -298,6 +305,134 @@ function randomRoomCode() {
   return code;
 }
 
+function savePvpSession() {
+  const payload = {
+    roomId: pvpState.roomId,
+    roomCode: pvpState.roomCode,
+    role: pvpState.role,
+  };
+  if (!payload.roomId) {
+    localStorage.removeItem(STORAGE_KEYS.pvpSession);
+    return;
+  }
+  localStorage.setItem(STORAGE_KEYS.pvpSession, JSON.stringify(payload));
+}
+
+function loadPvpSession() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEYS.pvpSession) || 'null');
+  } catch (_) {
+    return null;
+  }
+}
+
+function stopPvpWatchers() {
+  if (pvpPollTimer) {
+    clearInterval(pvpPollTimer);
+    pvpPollTimer = null;
+  }
+  if (pvpRoomChannel && supabaseClient) {
+    try { supabaseClient.removeChannel(pvpRoomChannel); } catch (_) {}
+  }
+  pvpRoomChannel = null;
+}
+
+function getPvpLevelFromRoom(room) {
+  const targetStage = room.mode === 'plus_one' ? 2 : 1;
+  const idx = LEVELS.findIndex(cfg => cfg.stage === targetStage && cfg.colors === room.colors_count);
+  return idx >= 0 ? idx + 1 : null;
+}
+
+function maybeStartLocalPvpRound(room) {
+  if (!room || room.status !== 'ready') return;
+  if (pvpState.localRoundStarted) return;
+  const lvl = getPvpLevelFromRoom(room);
+  if (!lvl) {
+    showToast('No matching level preset for room settings', 3000);
+    return;
+  }
+  pvpState.localRoundStarted = true;
+  showToast(`Match ready • ${room.room_code}`, 2200);
+  startLevel(lvl);
+}
+
+function applyRoomToPvpState(room, roleOverride = null) {
+  pvpState.roomId = room.id;
+  pvpState.roomCode = room.room_code;
+  pvpState.status = room.status;
+  pvpState.mode = room.mode;
+  pvpState.bestOf = room.best_of;
+  pvpState.colorsCount = room.colors_count;
+  if (roleOverride) pvpState.role = roleOverride;
+  savePvpSession();
+  renderPvpStatus({
+    roomCode: room.room_code,
+    role: pvpState.role,
+    status: room.status,
+    mode: room.mode,
+    bestOf: room.best_of,
+    colorsCount: room.colors_count,
+  });
+  maybeStartLocalPvpRound(room);
+}
+
+async function fetchRoomById(roomId) {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb.from('rooms').select('*').eq('id', roomId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('Room not found');
+  return data;
+}
+
+async function refreshPvpRoom() {
+  if (!pvpState.roomId) return;
+  try {
+    const room = await fetchRoomById(pvpState.roomId);
+    applyRoomToPvpState(room);
+  } catch (_) {}
+}
+
+async function watchPvpRoom(roomId) {
+  stopPvpWatchers();
+  const sb = getSupabaseClient();
+
+  try {
+    pvpRoomChannel = sb
+      .channel(`room-${roomId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'rooms',
+        filter: `id=eq.${roomId}`,
+      }, payload => {
+        const room = payload.new || payload.old;
+        if (room && payload.eventType !== 'DELETE') applyRoomToPvpState(room);
+      })
+      .subscribe();
+  } catch (_) {
+    pvpRoomChannel = null;
+  }
+
+  // Polling fallback (also useful if Realtime is not enabled yet)
+  pvpPollTimer = setInterval(refreshPvpRoom, 2500);
+  await refreshPvpRoom();
+}
+
+async function restorePvpSessionIfAny() {
+  const session = loadPvpSession();
+  if (!session || !session.roomId) return;
+  try {
+    await ensurePvpConfigReady();
+    pvpState.roomId = session.roomId;
+    pvpState.roomCode = session.roomCode || null;
+    pvpState.role = session.role || null;
+    pvpState.localRoundStarted = false;
+    await watchPvpRoom(session.roomId);
+  } catch (_) {
+    // keep silent on init; user can still use Dev Config fallback
+  }
+}
+
 function renderPvpStatus(info) {
   const box = document.getElementById('pvp-room-status');
   box.style.display = '';
@@ -430,15 +565,18 @@ async function createRoomMvp() {
   });
   if (matchStateRes.error) throw new Error(matchStateRes.error.message);
 
-  pvpState = { roomId: room.id, roomCode: room.room_code, role: 'host', status: room.status };
-  renderPvpStatus({
+  pvpState = {
+    roomId: room.id,
     roomCode: room.room_code,
     role: 'host',
     status: room.status,
     mode: room.mode,
     bestOf: room.best_of,
     colorsCount: room.colors_count,
-  });
+    localRoundStarted: false,
+  };
+  applyRoomToPvpState(room, 'host');
+  await watchPvpRoom(room.id);
   showToast(`Room created: ${room.room_code}`, 3000);
 }
 
@@ -479,15 +617,18 @@ async function joinRoomByCodeMvp() {
     }, { onConflict: 'room_id,player_id' });
   if (playerErr) throw new Error(playerErr.message);
 
-  pvpState = { roomId: room.id, roomCode: room.room_code, role: 'guest', status: 'ready' };
-  renderPvpStatus({
+  pvpState = {
+    roomId: room.id,
     roomCode: room.room_code,
     role: 'guest',
     status: 'ready',
     mode: room.mode,
     bestOf: room.best_of,
     colorsCount: room.colors_count,
-  });
+    localRoundStarted: false,
+  };
+  applyRoomToPvpState({ ...room, status: 'ready', guest_player_id: guestId }, 'guest');
+  await watchPvpRoom(room.id);
   showToast(`Joined: ${room.room_code}`, 3000);
 }
 
@@ -516,6 +657,7 @@ function initPvpMvp() {
   });
 
   pvpInitPromise = ensurePvpConfigReady();
+  restorePvpSessionIfAny();
 }
 
 // ---- LEVEL SELECT ----
