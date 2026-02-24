@@ -101,6 +101,15 @@ drop policy if exists "scores_upsert_own" on public.player_scores;
 create policy "scores_upsert_own" on public.player_scores
 for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+-- Public read for leaderboard (Top 10)
+drop policy if exists "profiles_public_select" on public.profiles;
+create policy "profiles_public_select" on public.profiles
+for select to anon, authenticated using (true);
+
+drop policy if exists "scores_public_select" on public.player_scores;
+create policy "scores_public_select" on public.player_scores
+for select to anon, authenticated using (true);
+
 -- PvP tables stay permissive for MVP guest/auth mixed mode (adjust later)
 -- If not created earlier, these will fail; that's okay for existing setup only.
 alter table public.rooms enable row level security;

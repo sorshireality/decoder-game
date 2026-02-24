@@ -97,6 +97,7 @@ const LEVEL_STAGE_SUMMARY_V2 = LEVELS_V2.reduce((acc, lvl) => {
 
 const ABILITY_UNLOCK_LEVEL = 6;
 const STAGE1_COUNT = 10;
+const MATCHMAKING_ROOM_TTL_MS = 10 * 60 * 1000;
 const STORAGE_KEYS = {
   progress: 'decoder_progress',
   score: 'decoder_score_state',
@@ -1036,6 +1037,10 @@ function randomRoomCode() {
   return code;
 }
 
+function getMatchmakingFreshSinceIso() {
+  return new Date(Date.now() - MATCHMAKING_ROOM_TTL_MS).toISOString();
+}
+
 function savePvpSession() {
   const payload = {
     roomId: pvpState.roomId,
@@ -1335,6 +1340,9 @@ function resetPvpStateLocal() {
   };
   localStorage.removeItem(STORAGE_KEYS.pvpSession);
   document.getElementById('btn-next').style.display = '';
+  if (document.getElementById('pvp-screen')) {
+    setPvpLobbyView('menu');
+  }
   updatePvpCompetitionUi();
 }
 
@@ -1500,6 +1508,11 @@ function resetLocalPvpMatchForRematch() {
   pvpMatch.guestCorrectCount = 0;
   pvpMatch.roundStatus = 'waiting';
   updatePvpCompetitionUi();
+}
+
+function getIsRematchSchemaMissingError(err) {
+  const msg = String(err?.message || '').toLowerCase();
+  return msg.includes('rematch_status') || msg.includes('rematch_requested_by');
 }
 
 async function addPvpWinAndAdvance() {
@@ -1951,6 +1964,7 @@ async function findMatchMvp() {
     .select('*')
     .eq('status', 'waiting_for_opponent')
     .is('guest_player_id', null)
+    .gte('created_at', getMatchmakingFreshSinceIso())
     .order('created_at', { ascending: true })
     .limit(25);
 
@@ -2502,7 +2516,11 @@ function init() {
             await requestRematchMvp();
           }
         } catch (e) {
-          showToast(e.message || 'Rematch failed', 2500);
+          if (getIsRematchSchemaMissingError(e)) {
+            showToast('Run latest Supabase SQL (rematch fields missing)', 3200);
+          } else {
+            showToast(e.message || 'Rematch failed', 2500);
+          }
         }
       })();
       return;
@@ -2522,7 +2540,9 @@ function init() {
       if (pvpMatch.rematchStatus === 'pending' && !getRematchRequesterIsMe()) {
         try {
           await declineRematchMvp();
-        } catch (_) {}
+        } catch (e) {
+          if (getIsRematchSchemaMissingError(e)) showToast('Run latest Supabase SQL (rematch fields missing)', 3200);
+        }
       }
       await leavePvpSession({ fromMatchEnd: true });
       document.getElementById('pvp-room-status').style.display = 'none';
