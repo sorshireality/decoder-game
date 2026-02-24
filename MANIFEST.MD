@@ -18,7 +18,7 @@
 - Backend (игровой): отсутствует, но добавлена клиентская интеграция с `Supabase` для PvP MVP-лобби и `Vercel` serverless endpoint для публичного конфига.
 - Multiplayer/PvP: частично реализован MVP-лобби слой (`Create Room` / `Join by Room Code`), PvP-геймплей еще не реализован.
 - Хранение прогресса: `localStorage`.
-- Offline/PWA: есть (`manifest.json` + `sw.js` с кешированием ассетов).
+- Offline/PWA: есть (`manifest.json` + `sw.js` с кешированием ассетов), приложение подготовлено для `Add to Home Screen` на iPhone.
 
 ## Поддержка языков
 
@@ -38,6 +38,7 @@
 - `/Users/oleksandrtiutiunnik/Documents/pet-projects/decoder-game/manifest.json` — PWA manifest.
 - `/Users/oleksandrtiutiunnik/Documents/pet-projects/decoder-game/api/config.js` — Vercel endpoint `/api/config` для выдачи публичного Supabase-конфига клиенту.
 - `/Users/oleksandrtiutiunnik/Documents/pet-projects/decoder-game/icons/*` — PWA иконки.
+- `/Users/oleksandrtiutiunnik/Documents/pet-projects/decoder-game/icons/apple-touch-icon.png` — iPhone Home Screen icon (`180x180`).
 
 ## Экраны приложения
 
@@ -153,6 +154,10 @@ PvP UX (текущее состояние):
 - `sw.js` использует `network-first` для app shell (`index.html`, `app.js`, `style.css`, `manifest.json`) и `cache-first` для прочих статических ассетов, чтобы уменьшить риск устаревшей версии после деплоя.
 - UI ориентирован на мобильные устройства (`100dvh`, safe-area, touch-friendly controls).
 - Это соответствует целевому требованию: **максимально легковесно и шустро**.
+- PWA/iPhone совместимость:
+  - `apple-touch-icon` (`180x180`)
+  - `apple-mobile-web-app-*` и `mobile-web-app-capable` meta
+  - относительные `manifest.id/start_url/scope = "./"` для работы на root/subpath (Vercel/GitHub Pages)
 - Дополнительно внесены мобильные оптимизации отклика:
   - `touch-action: manipulation` для интерактивных элементов
   - убрана анимация появления строк истории (снижает нагрузку на mobile Safari)

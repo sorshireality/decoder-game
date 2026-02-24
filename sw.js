@@ -1,4 +1,4 @@
-const CACHE_NAME = 'color-decoder-v4';
+const CACHE_NAME = 'color-decoder-v5';
 
 // Determine base path dynamically so it works on any subdirectory (e.g. GitHub Pages)
 const BASE = self.location.pathname.replace(/\/sw\.js$/, '');
@@ -9,6 +9,7 @@ const ASSETS = [
   BASE + '/style.css',
   BASE + '/app.js',
   BASE + '/manifest.json',
+  BASE + '/icons/apple-touch-icon.png',
   BASE + '/icons/icon-192.png',
   BASE + '/icons/icon-512.png'
 ];
