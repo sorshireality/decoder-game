@@ -379,9 +379,15 @@ let authState = {
   user: null,
   profile: null,
   authReady: false,
+  lastSyncToastAt: 0,
 };
 let supabaseClient = null;
 let supabaseClientCfgKey = '';
+let pvpConfigReadyCache = {
+  ok: false,
+  source: '',
+  verifiedAt: 0,
+};
 let pvpInitPromise = null;
 let pvpRoomChannel = null;
 let pvpPollTimer = null;
@@ -867,19 +873,27 @@ function updateAuthUi() {
   editNickBtn.textContent = t('nickChange');
 }
 
-async function handleAuthSession(session) {
+async function handleAuthSession(session, event = 'INITIAL_SESSION') {
+  const prevUserId = authState.user?.id || null;
   authState.user = session?.user || null;
   authState.authReady = true;
   authState.profile = null;
   if (authState.user) {
+    const shouldSyncCloud = ['INITIAL_SESSION', 'SIGNED_IN', 'USER_UPDATED'].includes(event) || prevUserId !== authState.user.id;
     try {
       await upsertProfileFromAuthUser(authState.user);
       try {
         authState.profile = await fetchProfile(authState.user.id);
       } catch (_) {}
-      await mergeLocalProgressToCloud(authState.user);
-      await syncLocalScoreToCloud();
-      showToast(t('progressSynced'), 1800);
+      if (shouldSyncCloud) {
+        await mergeLocalProgressToCloud(authState.user);
+        await syncLocalScoreToCloud();
+        const now = Date.now();
+        if (now - (authState.lastSyncToastAt || 0) > 12000) {
+          showToast(t('progressSynced'), 1800);
+          authState.lastSyncToastAt = now;
+        }
+      }
     } catch (err) {
       showToast(err?.message || 'Auth sync failed', 2500);
     }
@@ -895,9 +909,9 @@ async function initSupabaseAuth() {
   const sb = getSupabaseClient();
   const { data, error } = await sb.auth.getSession();
   if (error) throw error;
-  await handleAuthSession(data.session);
-  sb.auth.onAuthStateChange((_event, session) => {
-    handleAuthSession(session);
+  await handleAuthSession(data.session, 'INITIAL_SESSION');
+  sb.auth.onAuthStateChange((event, session) => {
+    handleAuthSession(session, event);
   });
 }
 
@@ -956,6 +970,9 @@ function getSupabaseClient() {
 function setPvpConnectionStatus(text, tone = '') {
   const el = document.getElementById('pvp-connection-status');
   if (!el) return;
+  if (el.textContent === text && ((tone && el.classList.contains(tone)) || (!tone && !el.classList.contains('ok') && !el.classList.contains('warn')))) {
+    return;
+  }
   el.textContent = text;
   el.classList.remove('ok', 'warn');
   if (tone) el.classList.add(tone);
@@ -984,20 +1001,29 @@ async function tryLoadSupabaseConfigFromServer() {
 }
 
 async function ensurePvpConfigReady() {
+  const now = Date.now();
+  if (pvpConfigReadyCache.ok && (now - pvpConfigReadyCache.verifiedAt < 60000)) {
+    if (pvpConfigReadyCache.source === 'backend') setPvpConnectionStatus(t('pvpConnectionBackend'), 'ok');
+    else if (pvpConfigReadyCache.source === 'fallback') setPvpConnectionStatus(t('pvpConnectionFallback'), 'warn');
+    return true;
+  }
   try {
     setPvpConnectionStatus(t('pvpConnectionChecking'));
     await tryLoadSupabaseConfigFromServer();
     getSupabaseClient();
     setPvpConnectionStatus(t('pvpConnectionBackend'), 'ok');
+    pvpConfigReadyCache = { ok: true, source: 'backend', verifiedAt: now };
     return true;
   } catch (_) {
     try {
       loadSupabaseConfigToForm();
       getSupabaseClient();
       setPvpConnectionStatus(t('pvpConnectionFallback'), 'warn');
+      pvpConfigReadyCache = { ok: true, source: 'fallback', verifiedAt: now };
       return true;
     } catch (fallbackErr) {
       setPvpConnectionStatus(t('pvpConnectionMissing'), 'warn');
+      pvpConfigReadyCache = { ok: false, source: '', verifiedAt: now };
       return false;
     }
   }
@@ -1757,8 +1783,14 @@ function updatePvpFindUi() {
 
 async function createRoomMvp() {
   await ensurePvpConfigReady();
-  const playerId = getCurrentPlayerId();
   const { mode, bestOf, colorsCount } = getPvpSettingsFromForm();
+  return createRoomMvpWithSettings({ mode, bestOf, colorsCount }, { openCreatedScreen: true });
+}
+
+async function createRoomMvpWithSettings({ mode, bestOf, colorsCount }, options = {}) {
+  const { openCreatedScreen = true, silentToast = false } = options;
+  await ensurePvpConfigReady();
+  const playerId = getCurrentPlayerId();
   const sb = getSupabaseClient();
 
   let room = null;
@@ -1824,9 +1856,10 @@ async function createRoomMvp() {
   };
   applyRoomToPvpState(room, 'host');
   updatePvpCreatedPanel();
-  setPvpLobbyView('created');
+  if (openCreatedScreen) setPvpLobbyView('created');
   await watchPvpRoom(room.id);
-  showToast(`Room created: ${room.room_code}`, 3000);
+  if (!silentToast) showToast(`Room created: ${room.room_code}`, 3000);
+  return room;
 }
 
 async function joinRoomRecordMvp(room) {
@@ -1850,9 +1883,15 @@ async function joinRoomRecordMvp(room) {
       .eq('status', 'waiting_for_opponent')
       .is('guest_player_id', null);
   }
-  const { data: claimedRoom, error: updateErr } = await claimQuery.select().maybeSingle();
+  let { data: claimedRoom, error: updateErr } = await claimQuery.select().maybeSingle();
   if (updateErr) throw new Error(updateErr.message);
-  if (!claimedRoom) throw new Error(t('pvpRoomUnavailable'));
+  if (!claimedRoom) {
+    // Some Supabase/RLS combinations may not return UPDATE rows reliably; verify via read.
+    const { data: reRead, error: readErr } = await sb.from('rooms').select('*').eq('id', room.id).maybeSingle();
+    if (readErr) throw new Error(readErr.message);
+    if (!reRead || reRead.guest_player_id !== playerId) throw new Error(t('pvpRoomUnavailable'));
+    claimedRoom = reRead;
+  }
 
   const { error: playerErr } = await sb
     .from('room_players')
@@ -1944,6 +1983,21 @@ async function findMatchMvp() {
   throw new Error(lastErr?.message || t('findNoRooms'));
 }
 
+async function createMatchmakingRoomMvp() {
+  if (pvpState.roomId) return null;
+  const findCfg = getPvpFindSettings();
+  const fallbackCreateCfg = getPvpSettingsFromForm();
+  const settings = findCfg.strategy === 'exact'
+    ? { mode: findCfg.mode, bestOf: findCfg.bestOf, colorsCount: findCfg.colorsCount }
+    : fallbackCreateCfg;
+  setPvpFindStatus(getPvpFindSettings().strategy === 'exact' ? t('searchingBySettings') : t('searching'));
+  const room = await createRoomMvpWithSettings(settings, { openCreatedScreen: true, silentToast: true });
+  stopAutoMatchSearch();
+  setPvpFindStatus('');
+  showToast(`Room created: ${room.room_code}`, 1800);
+  return room;
+}
+
 async function autoFindMatchTick() {
   if (!autoMatchSearch.active) return;
   try {
@@ -1953,10 +2007,20 @@ async function autoFindMatchTick() {
     return;
   } catch (err) {
     if (!autoMatchSearch.active) return;
-    const noRooms = (err?.message || '').includes(t('findNoRooms'));
-    setPvpFindStatus(noRooms
-      ? (getPvpFindSettings().strategy === 'exact' ? t('searchingBySettings') : t('searching'))
-      : (err.message || t('searching')));
+    const msg = err?.message || '';
+    const noRooms = msg.includes(t('findNoRooms'));
+    if (noRooms && !pvpState.roomId) {
+      try {
+        await createMatchmakingRoomMvp();
+        return;
+      } catch (createErr) {
+        setPvpFindStatus(createErr?.message || t('searching'));
+      }
+    } else {
+      setPvpFindStatus(noRooms
+        ? (getPvpFindSettings().strategy === 'exact' ? t('searchingBySettings') : t('searching'))
+        : (msg || t('searching')));
+    }
     autoMatchSearch.timer = setTimeout(autoFindMatchTick, 1800);
   }
 }
