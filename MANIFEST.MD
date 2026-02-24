@@ -27,6 +27,7 @@
 - Язык и прогресс сохраняются в `localStorage` (`decoder_progress`).
 - Дополнительно для PvP MVP в `localStorage` сохраняются:
   - guest id игрока
+  - nickname игрока (локально, для PvP UI/fallback)
   - конфиг Supabase (`url`, `anon key`) как кеш и `dev fallback`
 
 ## Структура файлов (текущая)
@@ -37,6 +38,7 @@
 - `/Users/oleksandrtiutiunnik/Documents/pet-projects/decoder-game/sw.js` — service worker (cache-first).
 - `/Users/oleksandrtiutiunnik/Documents/pet-projects/decoder-game/manifest.json` — PWA manifest.
 - `/Users/oleksandrtiutiunnik/Documents/pet-projects/decoder-game/api/config.js` — Vercel endpoint `/api/config` для выдачи публичного Supabase-конфига клиенту.
+- `/Users/oleksandrtiutiunnik/Documents/pet-projects/decoder-game/SUPABASE_AUTH_MVP.sql` — SQL-скрипт для Google Auth MVP (`profiles`, `player_progress`, `player_scores`) и расширения `room_players` полями `user_id/nickname`.
 - `/Users/oleksandrtiutiunnik/Documents/pet-projects/decoder-game/icons/*` — PWA иконки.
 - `/Users/oleksandrtiutiunnik/Documents/pet-projects/decoder-game/icons/apple-touch-icon.png` — iPhone Home Screen icon (`180x180`).
 
@@ -240,6 +242,9 @@ PvP UX (текущее состояние):
 - Реализовано: финальный PvP `Victory/Defeat` экран.
 - Реализовано: явный `Leave/Close Room` flow (из лобби и из игрового экрана), очистка локальной PvP-сессии.
 - Реализовано: базовый перевод PvP UI (`EN`/`UK`) для ключевых экранов/кнопок/форм.
+- Реализовано: `guest + Google Auth` UI в PvP-лобби (MVP).
+- Реализовано: синхронизация локального прогресса в облачный `player_progress` при логине (merge local->cloud).
+- Реализовано: подготовка PvP никнеймов соперника через `room_players.nickname` (после применения SQL-миграции).
 - Не реализовано пока: синхронизация попыток/истории соперника в реальном времени внутри игрового поля и пользовательские ники в БД/UI.
 
 ### PvP UI (MVP)

@@ -270,6 +270,18 @@ html, body {
   word-break: break-all;
 }
 
+.pvp-auth-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pvp-auth-btn {
+  padding: 10px 12px;
+  font-size: 0.86rem;
+  flex: 1 1 calc(50% - 4px);
+}
+
 .pvp-dev-config {
   display: flex;
   flex-direction: column;

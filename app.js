@@ -73,6 +73,12 @@ const I18N = {
     pvpNickPlaceholder:'Your nickname',
     pvpNickSave:      'Save',
     pvpPlayerLabel:   name => `Player: ${name}`,
+    authGuestMode:    'Guest mode',
+    authSignedAs:     email => `Signed in: ${email}`,
+    authGoogleIn:     'Google Sign In',
+    authSignOut:      'Sign Out',
+    nickChange:       'Change Nick',
+    progressSynced:   'Progress synced to account',
     pvpLeave:         'Leave PVP',
     pvpBackToPvp:     'Back to Duel',
     pvpCloseRoom:     'Close Room',
@@ -141,6 +147,12 @@ const I18N = {
     pvpNickPlaceholder:'Твій нікнейм',
     pvpNickSave:      'Зберегти',
     pvpPlayerLabel:   name => `Гравець: ${name}`,
+    authGuestMode:    'Режим гостя',
+    authSignedAs:     email => `Увійшов: ${email}`,
+    authGoogleIn:     'Увійти через Google',
+    authSignOut:      'Вийти',
+    nickChange:       'Змінити нік',
+    progressSynced:   'Прогрес синхронізовано',
     pvpLeave:         'Вийти з PvP',
     pvpBackToPvp:     'Назад до поєдинку',
     pvpCloseRoom:     'Закрити кімнату',
@@ -217,6 +229,8 @@ let pvpState = {
   localRoundStarted: false,
   pendingRoundResult: null,
   finalResult: null,
+  myName: null,
+  opponentName: null,
 };
 let pvpMatch = {
   hostWins: 0,
@@ -224,6 +238,11 @@ let pvpMatch = {
   hostCorrectCount: 0,
   guestCorrectCount: 0,
   roundStatus: 'waiting',
+};
+let authState = {
+  user: null,
+  profile: null,
+  authReady: false,
 };
 let supabaseClient = null;
 let supabaseClientCfgKey = '';
@@ -400,6 +419,141 @@ function ensurePvpNickname() {
   if (getNickname()) return true;
   showNicknameModal();
   return false;
+}
+
+function getCurrentPlayerId() {
+  return authState.user?.id || getGuestPlayerId();
+}
+
+function getCurrentPlayerNickname() {
+  return getNickname() || authState.profile?.nickname || authState.user?.user_metadata?.full_name || '';
+}
+
+async function fetchProfile(userId) {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb.from('profiles').select('*').eq('id', userId).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function upsertProfileFromAuthUser(user) {
+  if (!user) return;
+  const sb = getSupabaseClient();
+  const nickname = getNickname() || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Player';
+  const payload = {
+    id: user.id,
+    email: user.email || null,
+    nickname,
+    avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture || null,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await sb.from('profiles').upsert(payload);
+  if (error) throw error;
+  authState.profile = { ...(authState.profile || {}), ...payload };
+  if (!getNickname()) saveNickname(nickname);
+}
+
+async function mergeLocalProgressToCloud(user) {
+  if (!user) return;
+  const sb = getSupabaseClient();
+  const local = {
+    unlocked_level: state.unlockedLevel,
+    has_ability: state.hasAbility,
+    lang,
+  };
+  const { data: cloud, error: cloudErr } = await sb
+    .from('player_progress')
+    .select('*')
+    .eq('user_id', user.id)
+    .maybeSingle();
+  if (cloudErr) throw cloudErr;
+
+  const merged = {
+    user_id: user.id,
+    unlocked_level: Math.max(local.unlocked_level || 1, cloud?.unlocked_level || 1),
+    has_ability: Boolean(local.has_ability || cloud?.has_ability),
+    lang: local.lang || cloud?.lang || 'en',
+    updated_at: new Date().toISOString(),
+  };
+
+  state.unlockedLevel = merged.unlocked_level;
+  state.hasAbility = merged.has_ability;
+  saveProgress();
+
+  const { error } = await sb.from('player_progress').upsert(merged);
+  if (error) throw error;
+}
+
+function updateAuthUi() {
+  const authMeta = document.getElementById('pvp-auth-meta');
+  const signInBtn = document.getElementById('btn-auth-google');
+  const signOutBtn = document.getElementById('btn-auth-logout');
+  const editNickBtn = document.getElementById('btn-edit-nickname');
+  if (!authMeta || !signInBtn || !signOutBtn || !editNickBtn) return;
+
+  if (authState.user) {
+    authMeta.textContent = t('authSignedAs', authState.user.email || authState.profile?.nickname || 'Google');
+    signInBtn.style.display = 'none';
+    signOutBtn.style.display = '';
+  } else {
+    authMeta.textContent = t('authGuestMode');
+    signInBtn.style.display = '';
+    signOutBtn.style.display = 'none';
+  }
+  signInBtn.textContent = t('authGoogleIn');
+  signOutBtn.textContent = t('authSignOut');
+  editNickBtn.textContent = t('nickChange');
+}
+
+async function handleAuthSession(session) {
+  authState.user = session?.user || null;
+  authState.authReady = true;
+  authState.profile = null;
+  if (authState.user) {
+    try {
+      await upsertProfileFromAuthUser(authState.user);
+      try {
+        authState.profile = await fetchProfile(authState.user.id);
+      } catch (_) {}
+      await mergeLocalProgressToCloud(authState.user);
+      showToast(t('progressSynced'), 1800);
+    } catch (err) {
+      showToast(err?.message || 'Auth sync failed', 2500);
+    }
+  }
+  updateAuthUi();
+  updatePvpPlayerMeta();
+  updatePvpCompetitionUi();
+  if (currentScreen === 'level-screen') renderLevelSelect();
+}
+
+async function initSupabaseAuth() {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb.auth.getSession();
+  if (error) throw error;
+  await handleAuthSession(data.session);
+  sb.auth.onAuthStateChange((_event, session) => {
+    handleAuthSession(session);
+  });
+}
+
+async function signInWithGoogle() {
+  await ensurePvpConfigReady();
+  const sb = getSupabaseClient();
+  const redirectTo = `${window.location.origin}${window.location.pathname}`;
+  await sb.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo },
+  });
+}
+
+async function signOutGoogle() {
+  await ensurePvpConfigReady();
+  const sb = getSupabaseClient();
+  await sb.auth.signOut();
+  authState.user = null;
+  authState.profile = null;
+  updateAuthUi();
 }
 
 function saveSupabaseConfigFromForm() {
@@ -581,11 +735,34 @@ async function fetchRoomById(roomId) {
   return data;
 }
 
+async function fetchRoomPlayers(roomId) {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb
+    .from('room_players')
+    .select('player_id, role, nickname')
+    .eq('room_id', roomId);
+  if (error) throw error;
+  return data || [];
+}
+
+async function refreshPvpNames() {
+  if (!pvpState.roomId) return;
+  try {
+    const players = await fetchRoomPlayers(pvpState.roomId);
+    const me = players.find(p => p.role === pvpState.role);
+    const opp = players.find(p => p.role && p.role !== pvpState.role);
+    pvpState.myName = me?.nickname || getCurrentPlayerNickname() || null;
+    pvpState.opponentName = opp?.nickname || null;
+    updatePvpCompetitionUi();
+  } catch (_) {}
+}
+
 async function refreshPvpRoom() {
   if (!pvpState.roomId) return;
   try {
     const room = await fetchRoomById(pvpState.roomId);
     applyRoomToPvpState(room);
+    await refreshPvpNames();
     await refreshPvpMatchState();
   } catch (_) {}
 }
@@ -680,8 +857,8 @@ function updatePvpCompetitionUi() {
   const winsNeeded = getPvpWinsNeeded();
   const myWins = getMyPvpWins();
   const oppWins = getOpponentPvpWins();
-  const myLabel = (getNickname() || (isPvpRoleHost() ? t('pvpRoleHost') : t('pvpRoleGuest'))).slice(0, 8);
-  const oppLabel = isPvpRoleHost() ? t('pvpRoleGuest') : t('pvpRoleHost');
+  const myLabel = (pvpState.myName || getCurrentPlayerNickname() || (isPvpRoleHost() ? t('pvpRoleHost') : t('pvpRoleGuest'))).slice(0, 8);
+  const oppLabel = (pvpState.opponentName || (isPvpRoleHost() ? t('pvpRoleGuest') : t('pvpRoleHost'))).slice(0, 8);
   document.getElementById('pvp-you-label').textContent = myLabel;
   document.getElementById('pvp-opp-label').textContent = oppLabel;
 
@@ -744,6 +921,8 @@ function resetPvpStateLocal() {
     localRoundStarted: false,
     pendingRoundResult: null,
     finalResult: null,
+    myName: null,
+    opponentName: null,
   };
   pvpMatch = {
     hostWins: 0,
@@ -782,7 +961,7 @@ async function leavePvpSession(options = {}) {
       await sb.from('room_players')
         .delete()
         .eq('room_id', pvpState.roomId)
-        .eq('player_id', getGuestPlayerId());
+        .eq('player_id', getCurrentPlayerId());
     }
   } catch (_) {
     // still clear local state to avoid trapping the user
@@ -953,6 +1132,9 @@ function applyLang() {
   setText('pvp-menu-title', 'pvpMenuTitle');
   setText('btn-pvp-open-create', 'pvpCreate');
   setText('btn-pvp-open-join', 'pvpJoin');
+  setText('btn-auth-google', 'authGoogleIn');
+  setText('btn-auth-logout', 'authSignOut');
+  setText('btn-edit-nickname', 'nickChange');
   setText('pvp-create-title', 'pvpCreateRoom');
   setText('pvp-join-title', 'pvpJoinRoom');
   setText('pvp-mode-label', 'pvpMode');
@@ -977,6 +1159,7 @@ function applyLang() {
   updatePvpBestOfHint();
   updatePvpPlayerMeta();
   updatePvpCompetitionUi();
+  updateAuthUi();
   document.getElementById('lang-toggle').textContent = lang === 'uk' ? 'EN' : 'UA';
 }
 
@@ -1042,7 +1225,7 @@ function getPvpSettingsFromForm() {
 
 async function createRoomMvp() {
   await ensurePvpConfigReady();
-  const guestId = getGuestPlayerId();
+  const playerId = getCurrentPlayerId();
   const { mode, bestOf, colorsCount } = getPvpSettingsFromForm();
   const sb = getSupabaseClient();
 
@@ -1059,7 +1242,7 @@ async function createRoomMvp() {
         mode,
         best_of: bestOf,
         colors_count: colorsCount,
-        host_player_id: guestId,
+        host_player_id: playerId,
       })
       .select()
       .single();
@@ -1074,7 +1257,9 @@ async function createRoomMvp() {
 
   const hostPlayerRes = await sb.from('room_players').insert({
     room_id: room.id,
-    player_id: guestId,
+    player_id: getCurrentPlayerId(),
+    user_id: authState.user?.id || null,
+    nickname: getCurrentPlayerNickname() || getGuestPlayerId(),
     role: 'host',
     connection_status: 'connected',
   });
@@ -1102,6 +1287,8 @@ async function createRoomMvp() {
     bestOf: room.best_of,
     colorsCount: room.colors_count,
     localRoundStarted: false,
+    myName: getCurrentPlayerNickname() || null,
+    opponentName: null,
   };
   applyRoomToPvpState(room, 'host');
   await watchPvpRoom(room.id);
@@ -1110,7 +1297,7 @@ async function createRoomMvp() {
 
 async function joinRoomByCodeMvp() {
   await ensurePvpConfigReady();
-  const guestId = getGuestPlayerId();
+  const playerId = getCurrentPlayerId();
   const code = document.getElementById('pvp-room-code').value.trim().toUpperCase();
   if (!code) throw new Error('Enter room code');
 
@@ -1123,13 +1310,13 @@ async function joinRoomByCodeMvp() {
 
   if (roomErr) throw new Error(roomErr.message);
   if (!room) throw new Error('Room not found');
-  if (room.host_player_id === guestId) throw new Error('This device is already the host');
-  if (room.guest_player_id && room.guest_player_id !== guestId) throw new Error('Room already has guest');
+  if (room.host_player_id === playerId) throw new Error('This device is already the host');
+  if (room.guest_player_id && room.guest_player_id !== playerId) throw new Error('Room already has guest');
 
   const { error: updateErr } = await sb
     .from('rooms')
     .update({
-      guest_player_id: guestId,
+      guest_player_id: playerId,
       status: 'ready',
     })
     .eq('id', room.id);
@@ -1139,7 +1326,9 @@ async function joinRoomByCodeMvp() {
     .from('room_players')
     .upsert({
       room_id: room.id,
-      player_id: guestId,
+      player_id: getCurrentPlayerId(),
+      user_id: authState.user?.id || null,
+      nickname: getCurrentPlayerNickname() || getGuestPlayerId(),
       role: 'guest',
       connection_status: 'connected',
     }, { onConflict: 'room_id,player_id' });
@@ -1154,8 +1343,10 @@ async function joinRoomByCodeMvp() {
     bestOf: room.best_of,
     colorsCount: room.colors_count,
     localRoundStarted: false,
+    myName: getCurrentPlayerNickname() || null,
+    opponentName: null,
   };
-  applyRoomToPvpState({ ...room, status: 'ready', guest_player_id: guestId }, 'guest');
+  applyRoomToPvpState({ ...room, status: 'ready', guest_player_id: playerId }, 'guest');
   await watchPvpRoom(room.id);
   showToast(`Joined: ${room.room_code}`, 3000);
 }
@@ -1168,6 +1359,13 @@ function initPvpMvp() {
 
   document.getElementById('btn-save-supabase').addEventListener('click', saveSupabaseConfigFromForm);
   document.getElementById('btn-toggle-dev-config').addEventListener('click', togglePvpDevConfig);
+  document.getElementById('btn-auth-google').addEventListener('click', async () => {
+    try { await signInWithGoogle(); } catch (e) { showToast(e.message || 'Google sign-in failed', 2500); }
+  });
+  document.getElementById('btn-auth-logout').addEventListener('click', async () => {
+    try { await signOutGoogle(); } catch (e) { showToast(e.message || 'Sign out failed', 2500); }
+  });
+  document.getElementById('btn-edit-nickname').addEventListener('click', showNicknameModal);
   document.getElementById('btn-save-nickname').addEventListener('click', () => {
     const val = document.getElementById('nickname-input').value;
     if (!saveNickname(val)) {
@@ -1203,7 +1401,9 @@ function initPvpMvp() {
     }
   });
 
-  pvpInitPromise = ensurePvpConfigReady();
+  pvpInitPromise = ensurePvpConfigReady().then(ok => {
+    if (ok) return initSupabaseAuth().catch(() => {});
+  });
   restorePvpSessionIfAny();
 }
 
