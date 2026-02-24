@@ -46,12 +46,13 @@
 ## Экраны приложения
 
 1. `home-screen`
-2. `pvp-screen` (MVP лобби: connection status + Create/Join/Find Match)
-3. `level-screen`
-4. `game-screen` (single-player и PvP, с PvP competition overlay в правом верхнем углу)
-5. `pvp-round-screen` (быстрый экран между раундами PvP: `Next/Retry`)
-6. `result-screen` (solo result + финальный PvP `Victory/Defeat`)
-7. `toast` (overlay-уведомления)
+2. `leaderboard-screen` (глобальный рейтинг `Top 10` по `rating_score`)
+3. `pvp-screen` (MVP лобби: connection status + Create/Join/Find Match)
+4. `level-screen`
+5. `game-screen` (single-player и PvP, с PvP competition overlay в правом верхнем углу)
+6. `pvp-round-screen` (быстрый экран между раундами PvP: `Next/Retry`)
+7. `result-screen` (solo result + финальный PvP `Victory/Defeat`)
+8. `toast` (overlay-уведомления)
 
 ## Геймплей (текущая реализация)
 
@@ -77,6 +78,10 @@
 
 - Всего уровней: **15**
 - Стадий: **2**
+- В коде добавлен `LEVELS v2` каркас (backward-compatible):
+  - `LEVEL_PRESETS_V1` -> исходный список текущих уровней
+  - `LEVELS_V2` -> расширенный формат уровня (`feature`, `featureConfig`, `scoring`, `mode`, `stageLevel`)
+  - `LEVELS` пока остается legacy-совместимым flattened-view (`lvl.game`) для сохранения текущего поведения
 
 ### Stage 1 (уровни 1-10)
 
@@ -85,6 +90,18 @@
 ### Stage 2 (уровни 11-15)
 
 - В палитре есть **1 лишний цвет** (`paletteColors = colors + 1`)
+
+### LEVELS v2 (подготовка к новым стадиям)
+
+`LEVELS_V2` уже содержит поля для будущих механик:
+
+- `feature` (сейчас `none`)
+- `featureConfig`
+- `mode` (`classic` / `plus_one`)
+- `scoring` (`stageBasePoints`, `levelCoefficient`)
+- `stageLevel`, `globalLevel`
+
+Текущее поведение Stage 1/2 не изменено; refactor сделан как подготовка к новым стадиям (`повторы`, `туман`, `заморозка`, `цепочка`, `сигнатуры`).
 
 ### Разблокировка
 
@@ -150,6 +167,7 @@ PvP UX (текущее состояние):
   - `Any room`
   - `By settings` (mode/colors/best_of)
   - авто-подключение к первой подходящей комнате в статусе `waiting_for_opponent`
+- Добавлен `автопоиск матча` (циклический поиск с кнопкой остановки) в `Join`-экране.
 - Для формата `best of N` показывается подсказка в стиле `до X побед` (majority of rounds).
 - Добавлена защита от случайного `tap-through` на экранах результатов (короткий input lock + задержка кнопки выхода в PvP финале).
 
@@ -181,6 +199,11 @@ PvP UX (текущее состояние):
   - формула: `stage base points * level coefficient`
   - отображаются на `home-screen`
   - синхронизируются в `player_scores.main_game_score` и `player_scores.rating_score` при наличии Google-аккаунта
+- Глобальный рейтинг (MVP):
+  - отдельный экран `leaderboard-screen`
+  - `Top 10` по `player_scores.rating_score`
+  - загрузка `player_scores` + `profiles` (nickname/email)
+  - подсветка текущего авторизованного игрока
 
 ## Известные архитектурные ограничения (текущие)
 
@@ -262,6 +285,7 @@ PvP UX (текущее состояние):
 - Реализовано: `guest + Google Auth` UI в PvP-лобби (MVP).
 - Реализовано: синхронизация локального прогресса в облачный `player_progress` при логине (merge local->cloud).
 - Реализовано: подготовка PvP никнеймов соперника через `room_players.nickname` (после применения SQL-миграции).
+- Реализовано: `Rematch` в той же комнате после PvP матча (запрос / принять / отклонить) через поля `match_state.rematch_status/rematch_requested_by`.
 - Не реализовано пока: синхронизация попыток/истории соперника в реальном времени внутри игрового поля и пользовательские ники в БД/UI.
 
 ### PvP UI (MVP)

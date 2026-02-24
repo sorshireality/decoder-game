@@ -38,6 +38,13 @@ alter table public.room_players
 alter table public.room_players
   add column if not exists nickname text;
 
+alter table public.match_state
+  add column if not exists rematch_status text not null default 'idle'
+  check (rematch_status in ('idle', 'pending', 'accepted', 'declined'));
+
+alter table public.match_state
+  add column if not exists rematch_requested_by text;
+
 -- 5) updated_at trigger reuse
 create or replace function public.set_updated_at()
 returns trigger

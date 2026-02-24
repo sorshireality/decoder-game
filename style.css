@@ -160,6 +160,65 @@ html, body {
 /* ---- LEVEL SELECT ---- */
 #level-screen { gap: 0; }
 
+#leaderboard-screen {
+  gap: 0;
+}
+
+.leaderboard-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.leaderboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  min-height: 0;
+  padding-bottom: 12px;
+}
+
+.leaderboard-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.leaderboard-row.me {
+  border-color: var(--accent-light);
+  background: #fff8f2;
+}
+
+.leaderboard-rank {
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: var(--accent-dark);
+}
+
+.leaderboard-name {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-score {
+  font-size: 0.86rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
 .screen-header {
   display: flex;
   align-items: center;

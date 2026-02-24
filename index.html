@@ -28,7 +28,20 @@
     <div id="home-score" class="home-score">0 pts</div>
     <div class="home-actions">
       <button id="btn-play" class="btn-primary"></button>
+      <button id="btn-leaderboard" class="btn-secondary home-secondary-btn">Leaderboard</button>
       <button id="btn-pvp" class="btn-secondary home-secondary-btn">PVP (MVP)</button>
+    </div>
+  </div>
+
+  <!-- LEADERBOARD SCREEN -->
+  <div id="leaderboard-screen" class="screen">
+    <div class="screen-header">
+      <button id="btn-back-leaderboard" class="btn-back">←</button>
+      <h2 id="leaderboard-title">Leaderboard</h2>
+    </div>
+    <div class="leaderboard-panel">
+      <div id="leaderboard-status" class="pvp-meta"></div>
+      <div id="leaderboard-list" class="leaderboard-list"></div>
     </div>
   </div>
 
@@ -117,6 +130,7 @@
         </select>
       </div>
       <button id="btn-find-match" class="btn-primary pvp-btn">Find Match</button>
+      <div id="pvp-find-status" class="pvp-meta"></div>
       <div class="pvp-divider"></div>
       <input id="pvp-room-code" class="input-control code-input" type="text" maxlength="6" placeholder="ROOM CODE" />
       <button id="btn-join-room" class="btn-secondary pvp-btn">Join by Code</button>
