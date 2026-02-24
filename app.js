@@ -36,6 +36,7 @@ const ABILITY_UNLOCK_LEVEL = 6;
 const STAGE1_COUNT = 10;
 const STORAGE_KEYS = {
   progress: 'decoder_progress',
+  score: 'decoder_score_state',
   guestId: 'decoder_guest_id',
   nickname: 'decoder_nickname',
   supabaseCfg: 'decoder_supabase_cfg',
@@ -77,8 +78,17 @@ const I18N = {
     authSignedAs:     email => `Signed in: ${email}`,
     authGoogleIn:     'Google Sign In',
     authSignOut:      'Sign Out',
+    authHomeSigned:   name => name ? name : 'Account',
+    authHomeGuest:    'Google',
     nickChange:       'Change Nick',
     progressSynced:   'Progress synced to account',
+    scoreShort:       n => `${n} pts`,
+    matchmaking:      'Matchmaking',
+    matchmakingAny:   'Any room',
+    matchmakingExact: 'By settings',
+    findMatch:        'Find Match',
+    findNoRooms:      'No rooms found',
+    matchFound:       'Match found',
     pvpLeave:         'Leave PVP',
     pvpBackToPvp:     'Back to Duel',
     pvpCloseRoom:     'Close Room',
@@ -151,8 +161,17 @@ const I18N = {
     authSignedAs:     email => `Увійшов: ${email}`,
     authGoogleIn:     'Увійти через Google',
     authSignOut:      'Вийти',
+    authHomeSigned:   name => name ? name : 'Акаунт',
+    authHomeGuest:    'Google',
     nickChange:       'Змінити нік',
     progressSynced:   'Прогрес синхронізовано',
+    scoreShort:       n => `${n} очк.`,
+    matchmaking:      'Пошук матчу',
+    matchmakingAny:   'Будь-яка кімната',
+    matchmakingExact: 'За налаштуваннями',
+    findMatch:        'Знайти матч',
+    findNoRooms:      'Кімнат не знайдено',
+    matchFound:       'Матч знайдено',
     pvpLeave:         'Вийти з PvP',
     pvpBackToPvp:     'Назад до поєдинку',
     pvpCloseRoom:     'Закрити кімнату',
@@ -250,6 +269,9 @@ let pvpInitPromise = null;
 let pvpRoomChannel = null;
 let pvpPollTimer = null;
 let uiInteractionUnlocks = {};
+let scoreState = {
+  mainGameScore: 0,
+};
 
 // ---- STORAGE ----
 function saveProgress() {
@@ -273,6 +295,90 @@ function loadProgress() {
       if (d.lang && I18N[d.lang]) lang = d.lang;
     }
   } catch (_) {}
+}
+
+function saveScoreState() {
+  localStorage.setItem(STORAGE_KEYS.score, JSON.stringify(scoreState));
+}
+
+function loadScoreState() {
+  try {
+    const d = JSON.parse(localStorage.getItem(STORAGE_KEYS.score) || '{}');
+    scoreState.mainGameScore = Number(d.mainGameScore || 0);
+  } catch (_) {
+    scoreState.mainGameScore = 0;
+  }
+}
+
+function updateHomeScoreUi() {
+  const el = document.getElementById('home-score');
+  if (!el) return;
+  el.textContent = t('scoreShort', scoreState.mainGameScore || 0);
+}
+
+function getStageBasePoints(stage) {
+  return 10 + (Math.max(1, stage) - 1) * 5;
+}
+
+function getLevelCoefficient(stageLevel) {
+  return 1 + Math.max(0, stageLevel - 1) * 0.12;
+}
+
+function calculateMainGamePoints(levelNumber) {
+  const cfg = LEVELS[levelNumber - 1];
+  if (!cfg) return 0;
+  const stageLevel = stageLvlNum(levelNumber);
+  return Math.round(getStageBasePoints(cfg.stage) * getLevelCoefficient(stageLevel));
+}
+
+async function syncLocalScoreToCloud() {
+  if (!authState.user) return;
+  const sb = getSupabaseClient();
+  const localMain = Number(scoreState.mainGameScore || 0);
+  const { data: cloud, error: readErr } = await sb
+    .from('player_scores')
+    .select('*')
+    .eq('user_id', authState.user.id)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  const mergedMain = Math.max(localMain, Number(cloud?.main_game_score || 0));
+  scoreState.mainGameScore = mergedMain;
+  saveScoreState();
+  updateHomeScoreUi();
+  const payload = {
+    user_id: authState.user.id,
+    main_game_score: mergedMain,
+    rating_score: Math.max(mergedMain + Number(cloud?.daily_score || 0) + Number(cloud?.pvp_score || 0), Number(cloud?.rating_score || 0)),
+    daily_score: Number(cloud?.daily_score || 0),
+    pvp_score: Number(cloud?.pvp_score || 0),
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await sb.from('player_scores').upsert(payload);
+  if (error) throw error;
+}
+
+async function addMainGamePoints(points) {
+  if (!points || points < 1) return;
+  scoreState.mainGameScore += points;
+  saveScoreState();
+  updateHomeScoreUi();
+  if (authState.user) {
+    try {
+      const sb = getSupabaseClient();
+      const { data: cloud } = await sb.from('player_scores').select('*').eq('user_id', authState.user.id).maybeSingle();
+      const nextMain = Number(cloud?.main_game_score || 0) + points;
+      const nextDaily = Number(cloud?.daily_score || 0);
+      const nextPvp = Number(cloud?.pvp_score || 0);
+      await sb.from('player_scores').upsert({
+        user_id: authState.user.id,
+        main_game_score: nextMain,
+        daily_score: nextDaily,
+        pvp_score: nextPvp,
+        rating_score: nextMain + nextDaily + nextPvp,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (_) {}
+  }
 }
 
 // ---- HELPERS ----
@@ -489,16 +595,21 @@ function updateAuthUi() {
   const signInBtn = document.getElementById('btn-auth-google');
   const signOutBtn = document.getElementById('btn-auth-logout');
   const editNickBtn = document.getElementById('btn-edit-nickname');
-  if (!authMeta || !signInBtn || !signOutBtn || !editNickBtn) return;
+  const homeAuthBtn = document.getElementById('btn-auth-home');
+  if (!authMeta || !signInBtn || !signOutBtn || !editNickBtn || !homeAuthBtn) return;
 
   if (authState.user) {
     authMeta.textContent = t('authSignedAs', authState.user.email || authState.profile?.nickname || 'Google');
     signInBtn.style.display = 'none';
     signOutBtn.style.display = '';
+    homeAuthBtn.textContent = t('authHomeSigned', (authState.profile?.nickname || authState.user.user_metadata?.full_name || ''));
+    homeAuthBtn.classList.add('signed');
   } else {
     authMeta.textContent = t('authGuestMode');
     signInBtn.style.display = '';
     signOutBtn.style.display = 'none';
+    homeAuthBtn.textContent = t('authHomeGuest');
+    homeAuthBtn.classList.remove('signed');
   }
   signInBtn.textContent = t('authGoogleIn');
   signOutBtn.textContent = t('authSignOut');
@@ -516,6 +627,7 @@ async function handleAuthSession(session) {
         authState.profile = await fetchProfile(authState.user.id);
       } catch (_) {}
       await mergeLocalProgressToCloud(authState.user);
+      await syncLocalScoreToCloud();
       showToast(t('progressSynced'), 1800);
     } catch (err) {
       showToast(err?.message || 'Auth sync failed', 2500);
@@ -524,6 +636,7 @@ async function handleAuthSession(session) {
   updateAuthUi();
   updatePvpPlayerMeta();
   updatePvpCompetitionUi();
+  updateHomeScoreUi();
   if (currentScreen === 'level-screen') renderLevelSelect();
 }
 
@@ -1135,6 +1248,11 @@ function applyLang() {
   setText('btn-auth-google', 'authGoogleIn');
   setText('btn-auth-logout', 'authSignOut');
   setText('btn-edit-nickname', 'nickChange');
+  setText('pvp-find-mode-label', 'matchmaking');
+  setText('pvp-find-rule-mode-label', 'pvpMode');
+  setText('pvp-find-rule-colors-label', 'pvpColors');
+  setText('pvp-find-rule-bestof-label', 'pvpBestOf');
+  setText('btn-find-match', 'findMatch');
   setText('pvp-create-title', 'pvpCreateRoom');
   setText('pvp-join-title', 'pvpJoinRoom');
   setText('pvp-mode-label', 'pvpMode');
@@ -1156,10 +1274,33 @@ function applyLang() {
     if (classicOpt) classicOpt.textContent = t('pvpModeClassic');
     if (plusOneOpt) plusOneOpt.textContent = t('pvpModePlusOne');
   }
+  const findModeSelect = document.getElementById('pvp-find-mode-select');
+  if (findModeSelect) {
+    const anyOpt = findModeSelect.querySelector('option[value="any"]');
+    const exactOpt = findModeSelect.querySelector('option[value="exact"]');
+    if (anyOpt) anyOpt.textContent = t('matchmakingAny');
+    if (exactOpt) exactOpt.textContent = t('matchmakingExact');
+  }
+  ['pvp-find-rule-mode', 'pvp-find-rule-bestof'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    if (id === 'pvp-find-rule-mode') {
+      const classicOpt = sel.querySelector('option[value="classic"]');
+      const plusOneOpt = sel.querySelector('option[value="plus_one"]');
+      if (classicOpt) classicOpt.textContent = t('pvpModeClassic');
+      if (plusOneOpt) plusOneOpt.textContent = t('pvpModePlusOne');
+    } else if (id === 'pvp-find-rule-bestof') {
+      ['1', '3', '5'].forEach(v => {
+        const opt = sel.querySelector(`option[value="${v}"]`);
+        if (opt) opt.textContent = `Best of ${v}`;
+      });
+    }
+  });
   updatePvpBestOfHint();
   updatePvpPlayerMeta();
   updatePvpCompetitionUi();
   updateAuthUi();
+  updateHomeScoreUi();
   document.getElementById('lang-toggle').textContent = lang === 'uk' ? 'EN' : 'UA';
 }
 
@@ -1210,6 +1351,17 @@ function initHome() {
     if (!ensurePvpNickname()) return;
     showScreen('pvp-screen');
   });
+  document.getElementById('btn-auth-home').addEventListener('click', async () => {
+    try {
+      if (authState.user) {
+        showScreen('pvp-screen');
+        return;
+      }
+      await signInWithGoogle();
+    } catch (e) {
+      showToast(e.message || 'Google sign-in failed', 2500);
+    }
+  });
 
   document.getElementById('lang-toggle').addEventListener('click', toggleLang);
 }
@@ -1221,6 +1373,20 @@ function getPvpSettingsFromForm() {
     bestOf: Number(document.getElementById('pvp-bestof').value),
     colorsCount: Number(document.getElementById('pvp-colors').value),
   };
+}
+
+function getPvpFindSettings() {
+  return {
+    strategy: document.getElementById('pvp-find-mode-select').value,
+    mode: document.getElementById('pvp-find-rule-mode').value,
+    bestOf: Number(document.getElementById('pvp-find-rule-bestof').value),
+    colorsCount: Number(document.getElementById('pvp-find-rule-colors').value),
+  };
+}
+
+function updatePvpFindUi() {
+  const strategy = document.getElementById('pvp-find-mode-select').value;
+  document.getElementById('pvp-find-filters').style.display = strategy === 'exact' ? '' : 'none';
 }
 
 async function createRoomMvp() {
@@ -1295,21 +1461,11 @@ async function createRoomMvp() {
   showToast(`Room created: ${room.room_code}`, 3000);
 }
 
-async function joinRoomByCodeMvp() {
+async function joinRoomRecordMvp(room) {
   await ensurePvpConfigReady();
   const playerId = getCurrentPlayerId();
-  const code = document.getElementById('pvp-room-code').value.trim().toUpperCase();
-  if (!code) throw new Error('Enter room code');
-
   const sb = getSupabaseClient();
-  const { data: room, error: roomErr } = await sb
-    .from('rooms')
-    .select('*')
-    .eq('room_code', code)
-    .maybeSingle();
 
-  if (roomErr) throw new Error(roomErr.message);
-  if (!room) throw new Error('Room not found');
   if (room.host_player_id === playerId) throw new Error('This device is already the host');
   if (room.guest_player_id && room.guest_player_id !== playerId) throw new Error('Room already has guest');
 
@@ -1351,11 +1507,58 @@ async function joinRoomByCodeMvp() {
   showToast(`Joined: ${room.room_code}`, 3000);
 }
 
+async function joinRoomByCodeMvp() {
+  await ensurePvpConfigReady();
+  const code = document.getElementById('pvp-room-code').value.trim().toUpperCase();
+  if (!code) throw new Error('Enter room code');
+
+  const sb = getSupabaseClient();
+  const { data: room, error: roomErr } = await sb
+    .from('rooms')
+    .select('*')
+    .eq('room_code', code)
+    .maybeSingle();
+
+  if (roomErr) throw new Error(roomErr.message);
+  if (!room) throw new Error('Room not found');
+  await joinRoomRecordMvp(room);
+}
+
+async function findMatchMvp() {
+  await ensurePvpConfigReady();
+  const sb = getSupabaseClient();
+  const playerId = getCurrentPlayerId();
+  const cfg = getPvpFindSettings();
+
+  let query = sb
+    .from('rooms')
+    .select('*')
+    .eq('status', 'waiting_for_opponent')
+    .is('guest_player_id', null)
+    .order('created_at', { ascending: true })
+    .limit(25);
+
+  if (cfg.strategy === 'exact') {
+    query = query
+      .eq('mode', cfg.mode)
+      .eq('best_of', cfg.bestOf)
+      .eq('colors_count', cfg.colorsCount);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  const room = (data || []).find(r => r.host_player_id !== playerId);
+  if (!room) throw new Error(t('findNoRooms'));
+  showToast(`${t('matchFound')}: ${room.room_code}`, 1800);
+  await joinRoomRecordMvp(room);
+}
+
 function initPvpMvp() {
   loadSupabaseConfigToForm();
   setPvpConnectionStatus(t('pvpConnectionChecking'));
   setPvpLobbyView('menu');
   updatePvpBestOfHint();
+  updatePvpFindUi();
 
   document.getElementById('btn-save-supabase').addEventListener('click', saveSupabaseConfigFromForm);
   document.getElementById('btn-toggle-dev-config').addEventListener('click', togglePvpDevConfig);
@@ -1384,6 +1587,14 @@ function initPvpMvp() {
   document.getElementById('btn-pvp-create-back').addEventListener('click', () => setPvpLobbyView('menu'));
   document.getElementById('btn-pvp-join-back').addEventListener('click', () => setPvpLobbyView('menu'));
   document.getElementById('pvp-bestof').addEventListener('change', updatePvpBestOfHint);
+  document.getElementById('pvp-find-mode-select').addEventListener('change', updatePvpFindUi);
+  ['pvp-mode', 'pvp-colors', 'pvp-bestof'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      if (id === 'pvp-mode') document.getElementById('pvp-find-rule-mode').value = document.getElementById('pvp-mode').value;
+      if (id === 'pvp-colors') document.getElementById('pvp-find-rule-colors').value = document.getElementById('pvp-colors').value;
+      if (id === 'pvp-bestof') document.getElementById('pvp-find-rule-bestof').value = document.getElementById('pvp-bestof').value;
+    });
+  });
 
   document.getElementById('btn-create-room').addEventListener('click', async () => {
     try {
@@ -1398,6 +1609,13 @@ function initPvpMvp() {
       await joinRoomByCodeMvp();
     } catch (err) {
       showToast(err.message || 'Join room failed', 3000);
+    }
+  });
+  document.getElementById('btn-find-match').addEventListener('click', async () => {
+    try {
+      await findMatchMvp();
+    } catch (err) {
+      showToast(err.message || 'Find match failed', 2500);
     }
   });
 
@@ -1677,6 +1895,10 @@ async function onConfirm() {
       saveProgress();
     }
 
+    if (won) {
+      addMainGamePoints(calculateMainGamePoints(state.currentLevel));
+    }
+
     state.guess = new Array(cfg.colors).fill(null);
     renderGame();
     setTimeout(() => {
@@ -1732,6 +1954,7 @@ function showResult(won) {
 // ---- INIT ----
 function init() {
   loadProgress();
+  loadScoreState();
   applyLang();
   initHome();
   initPvpMvp();

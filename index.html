@@ -18,10 +18,14 @@
 
   <!-- HOME SCREEN -->
   <div id="home-screen" class="screen active">
-    <button id="lang-toggle" class="lang-toggle">UA</button>
+    <div class="home-top-actions">
+      <button id="btn-auth-home" class="home-auth-btn">Google</button>
+      <button id="lang-toggle" class="lang-toggle">UA</button>
+    </div>
     <div class="color-preview"></div>
     <h1 class="app-title">Color<span>Decoder</span></h1>
     <p id="app-subtitle" class="app-subtitle"></p>
+    <div id="home-score" class="home-score">0 pts</div>
     <div class="home-actions">
       <button id="btn-play" class="btn-primary"></button>
       <button id="btn-pvp" class="btn-secondary home-secondary-btn">PVP (MVP)</button>
@@ -87,6 +91,33 @@
         <button id="btn-pvp-join-back" class="btn-back pvp-mini-back">←</button>
         <h3 id="pvp-join-title" class="pvp-panel-title">Join Room</h3>
       </div>
+      <label id="pvp-find-mode-label" class="pvp-label" for="pvp-find-mode-select">Matchmaking</label>
+      <select id="pvp-find-mode-select" class="input-control">
+        <option value="any">Any room</option>
+        <option value="exact">By settings</option>
+      </select>
+      <div id="pvp-find-filters" style="display:none">
+        <label id="pvp-find-rule-mode-label" class="pvp-label" for="pvp-find-rule-mode">Mode</label>
+        <select id="pvp-find-rule-mode" class="input-control">
+          <option value="classic">Classic</option>
+          <option value="plus_one">+1 Decoy</option>
+        </select>
+        <label id="pvp-find-rule-colors-label" class="pvp-label" for="pvp-find-rule-colors">Colors</label>
+        <select id="pvp-find-rule-colors" class="input-control">
+          <option value="3">3</option>
+          <option value="4" selected>4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+        </select>
+        <label id="pvp-find-rule-bestof-label" class="pvp-label" for="pvp-find-rule-bestof">Best Of</label>
+        <select id="pvp-find-rule-bestof" class="input-control">
+          <option value="1">Best of 1</option>
+          <option value="3" selected>Best of 3</option>
+          <option value="5">Best of 5</option>
+        </select>
+      </div>
+      <button id="btn-find-match" class="btn-primary pvp-btn">Find Match</button>
+      <div class="pvp-divider"></div>
       <input id="pvp-room-code" class="input-control code-input" type="text" maxlength="6" placeholder="ROOM CODE" />
       <button id="btn-join-room" class="btn-secondary pvp-btn">Join by Code</button>
     </div>

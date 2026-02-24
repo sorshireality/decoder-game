@@ -110,3 +110,36 @@ begin
     for all to anon using (true) with check (true);
   end if;
 end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'rooms' and policyname = 'rooms_auth_all'
+  ) then
+    create policy "rooms_auth_all" on public.rooms
+    for all to authenticated using (true) with check (true);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'room_players' and policyname = 'room_players_auth_all'
+  ) then
+    create policy "room_players_auth_all" on public.room_players
+    for all to authenticated using (true) with check (true);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'match_state' and policyname = 'match_state_auth_all'
+  ) then
+    create policy "match_state_auth_all" on public.match_state
+    for all to authenticated using (true) with check (true);
+  end if;
+end $$;

@@ -18,6 +18,7 @@
 - Backend (игровой): отсутствует, но добавлена клиентская интеграция с `Supabase` для PvP MVP-лобби и `Vercel` serverless endpoint для публичного конфига.
 - Multiplayer/PvP: частично реализован MVP-лобби слой (`Create Room` / `Join by Room Code`), PvP-геймплей еще не реализован.
 - Хранение прогресса: `localStorage`.
+- Локальные очки (`main game`) также хранятся в `localStorage` и синхронизируются в облако при Google-логине (MVP).
 - Offline/PWA: есть (`manifest.json` + `sw.js` с кешированием ассетов), приложение подготовлено для `Add to Home Screen` на iPhone.
 
 ## Поддержка языков
@@ -45,7 +46,7 @@
 ## Экраны приложения
 
 1. `home-screen`
-2. `pvp-screen` (MVP лобби: connection status + Create/Join by code)
+2. `pvp-screen` (MVP лобби: connection status + Create/Join/Find Match)
 3. `level-screen`
 4. `game-screen` (single-player и PvP, с PvP competition overlay в правом верхнем углу)
 5. `pvp-round-screen` (быстрый экран между раундами PvP: `Next/Retry`)
@@ -145,6 +146,10 @@ PvP UX (текущее состояние):
 - При первом входе в PvP (если нет сохраненного ника) показывается модальное окно с предложением добавить никнейм.
 - Никнейм пока хранится локально в `localStorage` (без записи в БД) и используется в PvP UI для отображения локального игрока.
 - Блок `Connection` убран из контента PvP-экрана; вместо него статус подключения показывается компактным цветным chip в правом верхнем углу header.
+- В `Join` добавлен `Matchmaking`:
+  - `Any room`
+  - `By settings` (mode/colors/best_of)
+  - авто-подключение к первой подходящей комнате в статусе `waiting_for_opponent`
 - Для формата `best of N` показывается подсказка в стиле `до X побед` (majority of rounds).
 - Добавлена защита от случайного `tap-through` на экранах результатов (короткий input lock + задержка кнопки выхода в PvP финале).
 
@@ -164,6 +169,18 @@ PvP UX (текущее состояние):
   - `touch-action: manipulation` для интерактивных элементов
   - убрана анимация появления строк истории (снижает нагрузку на mobile Safari)
   - ослаблены тени на touch-устройствах
+
+## Auth / Profile / Score (MVP)
+
+- Доступны режимы `guest + Google Auth` (через Supabase Auth).
+- Кнопка входа Google вынесена на `home-screen` рядом с переключателем языка.
+- После логина выполняется merge локального прогресса (`decoder_progress`) в облачный `player_progress`.
+- Локальный никнейм используется как fallback и для PvP UI; при create/join в PvP пишется в `room_players.nickname` (после применения SQL миграции).
+- Main Game очки (MVP):
+  - начисляются за победу в solo-уровне
+  - формула: `stage base points * level coefficient`
+  - отображаются на `home-screen`
+  - синхронизируются в `player_scores.main_game_score` и `player_scores.rating_score` при наличии Google-аккаунта
 
 ## Известные архитектурные ограничения (текущие)
 
