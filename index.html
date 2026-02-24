@@ -31,29 +31,31 @@
     <div class="screen-header">
       <button id="btn-back-pvp" class="btn-back">←</button>
       <h2 id="pvp-title">PVP</h2>
-    </div>
-
-    <div class="pvp-panel">
-      <h3 class="pvp-panel-title">Connection</h3>
-      <div id="pvp-connection-status" class="pvp-connection-status">Connecting…</div>
-      <div id="pvp-guest-id" class="pvp-meta"></div>
-      <button id="btn-toggle-dev-config" class="btn-secondary pvp-dev-toggle" type="button">Dev Config (fallback)</button>
-      <div id="pvp-dev-config" class="pvp-dev-config" style="display:none">
-        <input id="supabase-url" class="input-control" type="url" placeholder="Supabase URL" />
-        <input id="supabase-anon-key" class="input-control" type="text" placeholder="Supabase anon key" />
-        <button id="btn-save-supabase" class="btn-secondary">Save Dev Config</button>
+      <div class="pvp-header-actions">
+        <div id="pvp-connection-status" class="pvp-connection-chip">Connecting…</div>
+        <button id="btn-toggle-dev-config" class="pvp-dev-icon" type="button" aria-label="Dev Config">⋯</button>
       </div>
     </div>
 
-    <div class="pvp-panel">
-      <h3 class="pvp-panel-title">Create Room (Host)</h3>
-      <label class="pvp-label" for="pvp-mode">Mode</label>
+    <div id="pvp-menu-panel" class="pvp-panel">
+      <h3 id="pvp-menu-title" class="pvp-panel-title">Duel</h3>
+      <div id="pvp-player-meta" class="pvp-meta"></div>
+      <button id="btn-pvp-open-create" class="btn-primary pvp-btn">Create Room</button>
+      <button id="btn-pvp-open-join" class="btn-secondary pvp-btn">Join Room</button>
+    </div>
+
+    <div id="pvp-create-panel" class="pvp-panel" style="display:none">
+      <div class="pvp-subheader">
+        <button id="btn-pvp-create-back" class="btn-back pvp-mini-back">←</button>
+        <h3 id="pvp-create-title" class="pvp-panel-title">Create Room</h3>
+      </div>
+      <label id="pvp-mode-label" class="pvp-label" for="pvp-mode">Mode</label>
       <select id="pvp-mode" class="input-control">
         <option value="classic">Classic</option>
         <option value="plus_one">+1 Decoy</option>
       </select>
 
-      <label class="pvp-label" for="pvp-colors">Colors</label>
+      <label id="pvp-colors-label" class="pvp-label" for="pvp-colors">Colors</label>
       <select id="pvp-colors" class="input-control">
         <option value="3">3</option>
         <option value="4" selected>4</option>
@@ -61,23 +63,45 @@
         <option value="6">6</option>
       </select>
 
-      <label class="pvp-label" for="pvp-bestof">Best Of</label>
+      <label id="pvp-bestof-label" class="pvp-label" for="pvp-bestof">Best Of</label>
       <select id="pvp-bestof" class="input-control">
         <option value="1">Best of 1</option>
         <option value="3" selected>Best of 3</option>
         <option value="5">Best of 5</option>
       </select>
+      <div id="pvp-bestof-hint" class="pvp-meta"></div>
 
       <button id="btn-create-room" class="btn-primary pvp-btn">Create Room</button>
     </div>
 
-    <div class="pvp-panel">
-      <h3 class="pvp-panel-title">Join Room</h3>
+    <div id="pvp-join-panel" class="pvp-panel" style="display:none">
+      <div class="pvp-subheader">
+        <button id="btn-pvp-join-back" class="btn-back pvp-mini-back">←</button>
+        <h3 id="pvp-join-title" class="pvp-panel-title">Join Room</h3>
+      </div>
       <input id="pvp-room-code" class="input-control code-input" type="text" maxlength="6" placeholder="ROOM CODE" />
       <button id="btn-join-room" class="btn-secondary pvp-btn">Join by Code</button>
     </div>
 
     <div id="pvp-room-status" class="pvp-panel pvp-status" style="display:none"></div>
+
+    <div id="pvp-dev-config" class="pvp-panel pvp-dev-config" style="display:none">
+      <h3 class="pvp-panel-title">Dev Config</h3>
+      <input id="supabase-url" class="input-control" type="url" placeholder="Supabase URL" />
+      <input id="supabase-anon-key" class="input-control" type="text" placeholder="Supabase anon key" />
+      <button id="btn-save-supabase" class="btn-secondary">Save Dev Config</button>
+    </div>
+  </div>
+
+  <div id="nickname-modal" class="modal-overlay" style="display:none">
+    <div class="modal-card">
+      <h3 id="nickname-modal-title" class="pvp-panel-title">Nickname</h3>
+      <p id="nickname-modal-subtitle" class="pvp-meta">Add a nickname for PvP</p>
+      <input id="nickname-input" class="input-control" type="text" maxlength="20" placeholder="Your nickname" />
+      <div class="modal-actions">
+        <button id="btn-save-nickname" class="btn-primary">Save</button>
+      </div>
+    </div>
   </div>
 
   <!-- LEVEL SELECT SCREEN -->

@@ -37,6 +37,7 @@ const STAGE1_COUNT = 10;
 const STORAGE_KEYS = {
   progress: 'decoder_progress',
   guestId: 'decoder_guest_id',
+  nickname: 'decoder_nickname',
   supabaseCfg: 'decoder_supabase_cfg',
   pvpSession: 'decoder_pvp_session',
 };
@@ -48,6 +49,46 @@ const I18N = {
     appSubtitle:      'Crack the secret color code',
     play:             'Play',
     pvp:              'PVP',
+    pvpTitle:         'Duel',
+    pvpConnection:    'Connection',
+    pvpMenuTitle:     'Duel',
+    pvpCreate:        'Create',
+    pvpJoin:          'Join',
+    pvpCreateRoom:    'Create Room',
+    pvpJoinRoom:      'Join Room',
+    pvpJoinByCode:    'Join by Code',
+    pvpMode:          'Mode',
+    pvpColors:        'Colors',
+    pvpBestOf:        'Match Format',
+    pvpModeClassic:   'Classic',
+    pvpModePlusOne:   '+1 Decoy',
+    pvpBestOfHint:    n => `First to ${Math.floor(n / 2) + 1} wins`,
+    pvpRoomCodePh:    'ROOM CODE',
+    pvpConnectionChecking: 'Checking connection…',
+    pvpConnectionBackend:  'Connected',
+    pvpConnectionFallback: 'Using local dev config',
+    pvpConnectionMissing:  'No backend config. Open Dev Config.',
+    pvpNickTitle:     'Nickname',
+    pvpNickSubtitle:  'Add a nickname for PvP',
+    pvpNickPlaceholder:'Your nickname',
+    pvpNickSave:      'Save',
+    pvpPlayerLabel:   name => `Player: ${name}`,
+    pvpLeave:         'Leave PVP',
+    pvpBackToPvp:     'Back to Duel',
+    pvpCloseRoom:     'Close Room',
+    pvpLeaveRoom:     'Leave Room',
+    pvpRoundWon:      'Round cleared',
+    pvpRoundLost:     'Round failed',
+    pvpRoundKeepGoing:'Keep going',
+    pvpRoundRetryFast:'Retry same round fast',
+    pvpNext:          'Next',
+    pvpRetry:         'Retry',
+    pvpVictory:       'Victory',
+    pvpDefeat:        'Defeat',
+    pvpFinalScore:    (a, b) => `Final score ${a}-${b}`,
+    pvpResultLock:    s => `Back in ${s}s`,
+    pvpRoleHost:      'Host',
+    pvpRoleGuest:     'Guest',
     selectLevel:      'Select Level',
     stageName:        n => `Stage ${n}`,
     stage2desc:       'Palette has one decoy color',
@@ -76,6 +117,46 @@ const I18N = {
     appSubtitle:      'Розгадай таємний колірний код',
     play:             'Грати',
     pvp:              'PVP',
+    pvpTitle:         'Поєдинок',
+    pvpConnection:    'Підключення',
+    pvpMenuTitle:     'Поєдинок',
+    pvpCreate:        'Створити',
+    pvpJoin:          'Приєднатись',
+    pvpCreateRoom:    'Створити кімнату',
+    pvpJoinRoom:      'Приєднатись',
+    pvpJoinByCode:    'Підключитись за кодом',
+    pvpMode:          'Режим',
+    pvpColors:        'Кольори',
+    pvpBestOf:        'Формат матчу',
+    pvpModeClassic:   'Класичний',
+    pvpModePlusOne:   '+1 зайвий',
+    pvpBestOfHint:    n => `До ${Math.floor(n / 2) + 1} перемог`,
+    pvpRoomCodePh:    'КОД КІМНАТИ',
+    pvpConnectionChecking: 'Перевірка підключення…',
+    pvpConnectionBackend:  'Підключено',
+    pvpConnectionFallback: 'Локальний dev-конфіг',
+    pvpConnectionMissing:  'Немає backend-конфігу. Відкрий Dev Config.',
+    pvpNickTitle:     'Нікнейм',
+    pvpNickSubtitle:  'Додай нікнейм для PvP',
+    pvpNickPlaceholder:'Твій нікнейм',
+    pvpNickSave:      'Зберегти',
+    pvpPlayerLabel:   name => `Гравець: ${name}`,
+    pvpLeave:         'Вийти з PvP',
+    pvpBackToPvp:     'Назад до поєдинку',
+    pvpCloseRoom:     'Закрити кімнату',
+    pvpLeaveRoom:     'Вийти з кімнати',
+    pvpRoundWon:      'Раунд пройдено',
+    pvpRoundLost:     'Раунд програно',
+    pvpRoundKeepGoing:'Продовжуй',
+    pvpRoundRetryFast:'Швидко повторити раунд',
+    pvpNext:          'Далі',
+    pvpRetry:         'Повторити',
+    pvpVictory:       'Перемога',
+    pvpDefeat:        'Поразка',
+    pvpFinalScore:    (a, b) => `Фінальний рахунок ${a}-${b}`,
+    pvpResultLock:    s => `Назад через ${s}с`,
+    pvpRoleHost:      'Ведучий',
+    pvpRoleGuest:     'Гість',
     selectLevel:      'Вибір рівня',
     stageName:        n => `Стадія ${n}`,
     stage2desc:       'У палітрі є один зайвий колір',
@@ -149,6 +230,7 @@ let supabaseClientCfgKey = '';
 let pvpInitPromise = null;
 let pvpRoomChannel = null;
 let pvpPollTimer = null;
+let uiInteractionUnlocks = {};
 
 // ---- STORAGE ----
 function saveProgress() {
@@ -215,6 +297,63 @@ function showScreen(id) {
   currentScreen = id;
 }
 
+function setPvpLobbyView(view) {
+  const menu = document.getElementById('pvp-menu-panel');
+  const create = document.getElementById('pvp-create-panel');
+  const join = document.getElementById('pvp-join-panel');
+  if (!menu || !create || !join) return;
+  menu.style.display = view === 'menu' ? '' : 'none';
+  create.style.display = view === 'create' ? '' : 'none';
+  join.style.display = view === 'join' ? '' : 'none';
+}
+
+function lockButtonForDelay(buttonEl, ms, baseLabel) {
+  if (!buttonEl) return;
+  const unlockAt = Date.now() + ms;
+  uiInteractionUnlocks[buttonEl.id] = unlockAt;
+  buttonEl.disabled = true;
+  buttonEl.classList.add('btn-delayed', 'is-counting');
+  buttonEl.style.setProperty('--delay-ms', `${ms}ms`);
+
+  const isResultBack = buttonEl.id === 'btn-levels' && pvpState.finalResult;
+  if (isResultBack) {
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((unlockAt - Date.now()) / 1000));
+      if (Date.now() >= unlockAt) {
+        buttonEl.textContent = baseLabel;
+        return;
+      }
+      buttonEl.textContent = t('pvpResultLock', left);
+      setTimeout(tick, 250);
+    };
+    tick();
+  }
+
+  setTimeout(() => {
+    if (uiInteractionUnlocks[buttonEl.id] !== unlockAt) return;
+    buttonEl.disabled = false;
+    buttonEl.classList.remove('is-counting');
+    if (baseLabel) buttonEl.textContent = baseLabel;
+  }, ms);
+}
+
+function protectScreenFromTapThrough(screenId, buttonIds, lockMs = 700) {
+  const screen = document.getElementById(screenId);
+  if (!screen) return;
+  screen.style.pointerEvents = 'none';
+  setTimeout(() => { screen.style.pointerEvents = ''; }, lockMs);
+  buttonIds.forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = true;
+  });
+  setTimeout(() => {
+    buttonIds.forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn && (!uiInteractionUnlocks[id] || Date.now() >= uiInteractionUnlocks[id])) btn.disabled = false;
+    });
+  }, lockMs);
+}
+
 function getGuestPlayerId() {
   let id = localStorage.getItem(STORAGE_KEYS.guestId);
   if (!id) {
@@ -224,13 +363,52 @@ function getGuestPlayerId() {
   return id;
 }
 
+function getNickname() {
+  return (localStorage.getItem(STORAGE_KEYS.nickname) || '').trim();
+}
+
+function saveNickname(name) {
+  const clean = (name || '').trim().slice(0, 20);
+  if (!clean) return false;
+  localStorage.setItem(STORAGE_KEYS.nickname, clean);
+  updatePvpPlayerMeta();
+  updatePvpCompetitionUi();
+  return true;
+}
+
+function updatePvpPlayerMeta() {
+  const meta = document.getElementById('pvp-player-meta');
+  if (!meta) return;
+  const nick = getNickname() || getGuestPlayerId();
+  meta.textContent = t('pvpPlayerLabel', nick);
+}
+
+function showNicknameModal() {
+  const modal = document.getElementById('nickname-modal');
+  const input = document.getElementById('nickname-input');
+  modal.style.display = '';
+  input.value = getNickname();
+  setTimeout(() => input.focus(), 20);
+}
+
+function hideNicknameModal() {
+  const modal = document.getElementById('nickname-modal');
+  modal.style.display = 'none';
+}
+
+function ensurePvpNickname() {
+  if (getNickname()) return true;
+  showNicknameModal();
+  return false;
+}
+
 function saveSupabaseConfigFromForm() {
   const url = document.getElementById('supabase-url').value.trim();
   const anonKey = document.getElementById('supabase-anon-key').value.trim();
   localStorage.setItem(STORAGE_KEYS.supabaseCfg, JSON.stringify({ url, anonKey }));
   supabaseClient = null;
   supabaseClientCfgKey = '';
-  setPvpConnectionStatus('Using local dev config', 'warn');
+  setPvpConnectionStatus(t('pvpConnectionFallback'), 'warn');
   showToast('Supabase config saved');
 }
 
@@ -289,19 +467,19 @@ async function tryLoadSupabaseConfigFromServer() {
 
 async function ensurePvpConfigReady() {
   try {
-    setPvpConnectionStatus('Connecting to backend config…');
+    setPvpConnectionStatus(t('pvpConnectionChecking'));
     await tryLoadSupabaseConfigFromServer();
     getSupabaseClient();
-    setPvpConnectionStatus('Connected via Vercel config', 'ok');
+    setPvpConnectionStatus(t('pvpConnectionBackend'), 'ok');
     return true;
   } catch (_) {
     try {
       loadSupabaseConfigToForm();
       getSupabaseClient();
-      setPvpConnectionStatus('Using local dev config (fallback)', 'warn');
+      setPvpConnectionStatus(t('pvpConnectionFallback'), 'warn');
       return true;
     } catch (fallbackErr) {
-      setPvpConnectionStatus('No backend config. Open Dev Config (fallback).', 'warn');
+      setPvpConnectionStatus(t('pvpConnectionMissing'), 'warn');
       return false;
     }
   }
@@ -502,8 +680,8 @@ function updatePvpCompetitionUi() {
   const winsNeeded = getPvpWinsNeeded();
   const myWins = getMyPvpWins();
   const oppWins = getOpponentPvpWins();
-  const myLabel = isPvpRoleHost() ? 'Host' : 'Guest';
-  const oppLabel = isPvpRoleHost() ? 'Guest' : 'Host';
+  const myLabel = (getNickname() || (isPvpRoleHost() ? t('pvpRoleHost') : t('pvpRoleGuest'))).slice(0, 8);
+  const oppLabel = isPvpRoleHost() ? t('pvpRoleGuest') : t('pvpRoleHost');
   document.getElementById('pvp-you-label').textContent = myLabel;
   document.getElementById('pvp-opp-label').textContent = oppLabel;
 
@@ -523,30 +701,34 @@ function showPvpRoundScreen(kind) {
 
   if (kind === 'won') {
     emoji.textContent = '✅';
-    title.textContent = 'Round cleared';
+    title.textContent = t('pvpRoundWon');
     subtitle.textContent = `Score ${getMyPvpWins()}-${getOpponentPvpWins()} • Opp ${getOpponentPvpCorrectCount()}/${pvpState.colorsCount || '-'}`;
-    nextBtn.textContent = 'Next';
+    nextBtn.textContent = t('pvpNext');
     nextBtn.style.display = '';
   } else {
     emoji.textContent = '❌';
-    title.textContent = 'Round failed';
-    subtitle.textContent = 'Retry same round fast';
-    nextBtn.textContent = 'Retry';
+    title.textContent = t('pvpRoundLost');
+    subtitle.textContent = t('pvpRoundRetryFast');
+    nextBtn.textContent = t('pvpRetry');
     nextBtn.style.display = '';
   }
   showScreen('pvp-round-screen');
+  protectScreenFromTapThrough('pvp-round-screen', ['btn-pvp-round-next', 'btn-pvp-round-back'], 700);
+  lockButtonForDelay(document.getElementById('btn-pvp-round-back'), 1400, t('pvpBackToPvp'));
 }
 
 function showPvpFinalResult(won) {
   pvpState.finalResult = won ? 'win' : 'lose';
   document.getElementById('result-emoji').textContent = won ? '🏆' : '😞';
-  document.getElementById('result-title').textContent = won ? 'Victory' : 'Defeat';
+  document.getElementById('result-title').textContent = won ? t('pvpVictory') : t('pvpDefeat');
   document.getElementById('result-subtitle').textContent =
-    `Final score ${getMyPvpWins()}-${getOpponentPvpWins()}`;
+    t('pvpFinalScore', getMyPvpWins(), getOpponentPvpWins());
   document.getElementById('result-answer').innerHTML = '';
   document.getElementById('btn-next').style.display = 'none';
-  document.getElementById('btn-levels').textContent = 'Back to PVP';
+  document.getElementById('btn-levels').textContent = t('pvpBackToPvp');
   showScreen('result-screen');
+  protectScreenFromTapThrough('result-screen', ['btn-levels'], 800);
+  lockButtonForDelay(document.getElementById('btn-levels'), 1800, t('pvpBackToPvp'));
 }
 
 function resetPvpStateLocal() {
@@ -718,16 +900,26 @@ function renderPvpStatus(info) {
   const box = document.getElementById('pvp-room-status');
   box.style.display = '';
   const winsNeeded = pvpState.bestOf ? getPvpWinsNeeded() : null;
+  const roleLabel = info.role === 'host'
+    ? t('pvpRoleHost')
+    : info.role === 'guest'
+      ? t('pvpRoleGuest')
+      : (info.role || '-');
+  const modeLabel = info.mode === 'classic'
+    ? t('pvpModeClassic')
+    : info.mode === 'plus_one'
+      ? t('pvpModePlusOne')
+      : (info.mode || '-');
   box.innerHTML = `
-    <h3 class="pvp-panel-title">Room Status</h3>
-    <div class="pvp-status-line"><span class="pvp-status-label">Room Code</span><span class="pvp-status-value">${info.roomCode || '-'}</span></div>
-    <div class="pvp-status-line"><span class="pvp-status-label">Role</span><span class="pvp-status-value">${info.role || '-'}</span></div>
+    <h3 class="pvp-panel-title">${t('pvpJoinRoom')}</h3>
+    <div class="pvp-status-line"><span class="pvp-status-label">Code</span><span class="pvp-status-value">${info.roomCode || '-'}</span></div>
+    <div class="pvp-status-line"><span class="pvp-status-label">Role</span><span class="pvp-status-value">${roleLabel}</span></div>
     <div class="pvp-status-line"><span class="pvp-status-label">Status</span><span class="pvp-status-value">${info.status || '-'}</span></div>
-    <div class="pvp-status-line"><span class="pvp-status-label">Mode</span><span class="pvp-status-value">${info.mode || '-'}</span></div>
-    <div class="pvp-status-line"><span class="pvp-status-label">Best Of</span><span class="pvp-status-value">${info.bestOf || '-'}</span></div>
-    <div class="pvp-status-line"><span class="pvp-status-label">Colors</span><span class="pvp-status-value">${info.colorsCount || '-'}</span></div>
+    <div class="pvp-status-line"><span class="pvp-status-label">${t('pvpMode')}</span><span class="pvp-status-value">${modeLabel}</span></div>
+    <div class="pvp-status-line"><span class="pvp-status-label">${t('pvpBestOf')}</span><span class="pvp-status-value">${info.bestOf || '-'}</span></div>
+    <div class="pvp-status-line"><span class="pvp-status-label">${t('pvpColors')}</span><span class="pvp-status-value">${info.colorsCount || '-'}</span></div>
     ${winsNeeded ? `<div class="pvp-status-line"><span class="pvp-status-label">Score</span><span class="pvp-status-value">${getMyPvpWins()}-${getOpponentPvpWins()} / ${winsNeeded}</span></div>` : ''}
-    <button id="btn-pvp-leave-lobby" class="btn-secondary pvp-btn">${isPvpRoleHost() ? 'Close Room' : 'Leave Room'}</button>
+    <button id="btn-pvp-leave-lobby" class="btn-secondary pvp-btn">${isPvpRoleHost() ? t('pvpCloseRoom') : t('pvpLeaveRoom')}</button>
   `;
   const leaveLobbyBtn = document.getElementById('btn-pvp-leave-lobby');
   if (leaveLobbyBtn) {
@@ -739,13 +931,52 @@ function renderPvpStatus(info) {
   }
 }
 
+function updatePvpBestOfHint() {
+  const select = document.getElementById('pvp-bestof');
+  const hint = document.getElementById('pvp-bestof-hint');
+  if (!select || !hint) return;
+  hint.textContent = t('pvpBestOfHint', Number(select.value || 1));
+}
+
 // ---- LANG ----
 function applyLang() {
   document.documentElement.lang = lang;
   document.getElementById('app-subtitle').textContent = t('appSubtitle');
   document.getElementById('btn-play').textContent = t('play');
   const pvpBtn = document.getElementById('btn-pvp');
-  if (pvpBtn) pvpBtn.textContent = `${t('pvp')} (MVP)`;
+  if (pvpBtn) pvpBtn.textContent = t('pvpTitle');
+  const setText = (id, key) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = t(key);
+  };
+  setText('pvp-title', 'pvpTitle');
+  setText('pvp-menu-title', 'pvpMenuTitle');
+  setText('btn-pvp-open-create', 'pvpCreate');
+  setText('btn-pvp-open-join', 'pvpJoin');
+  setText('pvp-create-title', 'pvpCreateRoom');
+  setText('pvp-join-title', 'pvpJoinRoom');
+  setText('pvp-mode-label', 'pvpMode');
+  setText('pvp-colors-label', 'pvpColors');
+  setText('pvp-bestof-label', 'pvpBestOf');
+  setText('btn-create-room', 'pvpCreateRoom');
+  setText('btn-join-room', 'pvpJoinByCode');
+  setText('btn-pvp-leave', 'pvpLeave');
+  setText('btn-pvp-round-back', 'pvpBackToPvp');
+  setText('nickname-modal-title', 'pvpNickTitle');
+  setText('nickname-modal-subtitle', 'pvpNickSubtitle');
+  setText('btn-save-nickname', 'pvpNickSave');
+  document.getElementById('nickname-input').placeholder = t('pvpNickPlaceholder');
+  document.getElementById('pvp-room-code').placeholder = t('pvpRoomCodePh');
+  const modeSelect = document.getElementById('pvp-mode');
+  if (modeSelect) {
+    const classicOpt = modeSelect.querySelector('option[value="classic"]');
+    const plusOneOpt = modeSelect.querySelector('option[value="plus_one"]');
+    if (classicOpt) classicOpt.textContent = t('pvpModeClassic');
+    if (plusOneOpt) plusOneOpt.textContent = t('pvpModePlusOne');
+  }
+  updatePvpBestOfHint();
+  updatePvpPlayerMeta();
+  updatePvpCompetitionUi();
   document.getElementById('lang-toggle').textContent = lang === 'uk' ? 'EN' : 'UA';
 }
 
@@ -756,6 +987,10 @@ function toggleLang() {
   if (currentScreen === 'level-screen') renderLevelSelect();
   if (currentScreen === 'game-screen') renderGame();
   if (currentScreen === 'result-screen') {
+    if (pvpState.finalResult) {
+      showPvpFinalResult(pvpState.finalResult === 'win');
+      return;
+    }
     const cfg = LEVELS[state.currentLevel - 1];
     const won = state.history.length > 0 &&
       state.history[state.history.length - 1].correct === cfg.colors;
@@ -789,6 +1024,7 @@ function initHome() {
   });
 
   document.getElementById('btn-pvp').addEventListener('click', () => {
+    if (!ensurePvpNickname()) return;
     showScreen('pvp-screen');
   });
 
@@ -925,12 +1161,31 @@ async function joinRoomByCodeMvp() {
 }
 
 function initPvpMvp() {
-  document.getElementById('pvp-guest-id').textContent = `Guest ID: ${getGuestPlayerId()}`;
   loadSupabaseConfigToForm();
-  setPvpConnectionStatus('Checking connection…');
+  setPvpConnectionStatus(t('pvpConnectionChecking'));
+  setPvpLobbyView('menu');
+  updatePvpBestOfHint();
 
   document.getElementById('btn-save-supabase').addEventListener('click', saveSupabaseConfigFromForm);
   document.getElementById('btn-toggle-dev-config').addEventListener('click', togglePvpDevConfig);
+  document.getElementById('btn-save-nickname').addEventListener('click', () => {
+    const val = document.getElementById('nickname-input').value;
+    if (!saveNickname(val)) {
+      showToast('Enter nickname', 1500);
+      return;
+    }
+    hideNicknameModal();
+    if (currentScreen === 'home-screen') showScreen('pvp-screen');
+  });
+  document.getElementById('nickname-input').addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    document.getElementById('btn-save-nickname').click();
+  });
+  document.getElementById('btn-pvp-open-create').addEventListener('click', () => setPvpLobbyView('create'));
+  document.getElementById('btn-pvp-open-join').addEventListener('click', () => setPvpLobbyView('join'));
+  document.getElementById('btn-pvp-create-back').addEventListener('click', () => setPvpLobbyView('menu'));
+  document.getElementById('btn-pvp-join-back').addEventListener('click', () => setPvpLobbyView('menu'));
+  document.getElementById('pvp-bestof').addEventListener('change', updatePvpBestOfHint);
 
   document.getElementById('btn-create-room').addEventListener('click', async () => {
     try {
@@ -1271,6 +1526,7 @@ function showResult(won) {
 
   document.getElementById('btn-levels').textContent = t('allLevels');
   showScreen('result-screen');
+  protectScreenFromTapThrough('result-screen', ['btn-next', 'btn-levels'], 700);
 }
 
 // ---- INIT ----
