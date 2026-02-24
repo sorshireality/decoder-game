@@ -136,6 +136,31 @@
       <button id="btn-join-room" class="btn-secondary pvp-btn">Join by Code</button>
     </div>
 
+    <div id="pvp-searching-panel" class="pvp-panel" style="display:none">
+      <div class="pvp-search-hero">
+        <div class="pvp-spinner" aria-hidden="true"></div>
+        <h3 id="pvp-searching-title" class="pvp-panel-title">Searching match</h3>
+        <div id="pvp-searching-subtitle" class="pvp-meta">Looking for a room…</div>
+        <div id="pvp-searching-status" class="pvp-meta"></div>
+      </div>
+      <button id="btn-pvp-search-cancel" class="btn-secondary pvp-btn">Cancel</button>
+      <button id="btn-pvp-search-code" class="btn-primary pvp-btn">Join by Code</button>
+    </div>
+
+    <div id="pvp-created-panel" class="pvp-panel" style="display:none">
+      <div class="pvp-search-hero">
+        <div class="pvp-spinner" aria-hidden="true"></div>
+        <h3 id="pvp-created-title" class="pvp-panel-title">Room Created</h3>
+        <div id="pvp-created-subtitle" class="pvp-meta">Waiting for opponent…</div>
+      </div>
+      <div class="pvp-status-line">
+        <span class="pvp-status-label" id="pvp-created-code-label">Code</span>
+        <span id="pvp-created-code" class="pvp-status-value">------</span>
+      </div>
+      <div id="pvp-created-match-info" class="pvp-meta"></div>
+      <button id="btn-pvp-created-cancel" class="btn-secondary pvp-btn">Cancel</button>
+    </div>
+
     <div id="pvp-room-status" class="pvp-panel pvp-status" style="display:none"></div>
 
     <div id="pvp-dev-config" class="pvp-panel pvp-dev-config" style="display:none">

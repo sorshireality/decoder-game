@@ -159,6 +159,15 @@ const I18N = {
     stopSearch:       'Stop Search',
     searching:        'Searching…',
     searchingBySettings:'Searching by settings…',
+    pvpSearchingTitle:'Searching Match',
+    pvpSearchingSub:  'Looking for an opponent…',
+    pvpCreatedTitle:  'Room Created',
+    pvpCreatedSub:    'Waiting for opponent…',
+    pvpCancel:        'Cancel',
+    pvpCodeLabel:     'Code',
+    pvpCreateWaitingInfo: (mode, bestOf, colors) => `${mode} • Best of ${bestOf} • ${colors} colors`,
+    pvpRoomTaken:     'Room just got taken. Trying next…',
+    pvpRoomUnavailable:'Room unavailable',
     findNoRooms:      'No rooms found',
     matchFound:       'Match found',
     rematch:          'Rematch',
@@ -259,6 +268,15 @@ const I18N = {
     stopSearch:       'Зупинити пошук',
     searching:        'Пошук…',
     searchingBySettings:'Пошук за налаштуваннями…',
+    pvpSearchingTitle:'Пошук матчу',
+    pvpSearchingSub:  'Шукаємо суперника…',
+    pvpCreatedTitle:  'Кімнату створено',
+    pvpCreatedSub:    'Очікування суперника…',
+    pvpCancel:        'Скасувати',
+    pvpCodeLabel:     'Код',
+    pvpCreateWaitingInfo: (mode, bestOf, colors) => `${mode} • Best of ${bestOf} • ${colors} кол.`,
+    pvpRoomTaken:     'Кімнату щойно зайняли. Шукаємо далі…',
+    pvpRoomUnavailable:'Кімната недоступна',
     findNoRooms:      'Кімнат не знайдено',
     matchFound:       'Матч знайдено',
     rematch:          'Реванш',
@@ -427,6 +445,8 @@ function setPvpFindStatus(msg = '') {
   const el = document.getElementById('pvp-find-status');
   if (!el) return;
   el.textContent = msg;
+  const searchingEl = document.getElementById('pvp-searching-status');
+  if (searchingEl) searchingEl.textContent = msg;
 }
 
 function renderLeaderboard() {
@@ -636,14 +656,31 @@ function setPvpLobbyView(view) {
   const menu = document.getElementById('pvp-menu-panel');
   const create = document.getElementById('pvp-create-panel');
   const join = document.getElementById('pvp-join-panel');
-  if (!menu || !create || !join) return;
+  const searching = document.getElementById('pvp-searching-panel');
+  const created = document.getElementById('pvp-created-panel');
+  const roomStatus = document.getElementById('pvp-room-status');
+  if (!menu || !create || !join || !searching || !created || !roomStatus) return;
   menu.style.display = view === 'menu' ? '' : 'none';
   create.style.display = view === 'create' ? '' : 'none';
   join.style.display = view === 'join' ? '' : 'none';
-  if (view !== 'join') {
+  searching.style.display = view === 'searching' ? '' : 'none';
+  created.style.display = view === 'created' ? '' : 'none';
+  roomStatus.style.display = view === 'status' ? '' : 'none';
+  if (view !== 'join' && view !== 'searching') {
     stopAutoMatchSearch();
     setPvpFindStatus('');
   }
+}
+
+function updatePvpCreatedPanel() {
+  const codeEl = document.getElementById('pvp-created-code');
+  const infoEl = document.getElementById('pvp-created-match-info');
+  if (!codeEl || !infoEl) return;
+  codeEl.textContent = (pvpState.roomCode || '------').toUpperCase();
+  const modeLabel = pvpState.mode === 'plus_one' ? t('pvpModePlusOne') : t('pvpModeClassic');
+  infoEl.textContent = pvpState.bestOf && pvpState.colorsCount
+    ? t('pvpCreateWaitingInfo', modeLabel, pvpState.bestOf, pvpState.colorsCount)
+    : '';
 }
 
 function lockButtonForDelay(buttonEl, ms, baseLabel) {
@@ -1036,6 +1073,7 @@ function applyRoomToPvpState(room, roleOverride = null) {
   if (roleOverride) pvpState.role = roleOverride;
   savePvpSession();
   updatePvpCompetitionUi();
+  updatePvpCreatedPanel();
   renderPvpStatus({
     roomCode: room.room_code,
     role: pvpState.role,
@@ -1044,6 +1082,13 @@ function applyRoomToPvpState(room, roleOverride = null) {
     bestOf: room.best_of,
     colorsCount: room.colors_count,
   });
+  if (currentScreen === 'pvp-screen') {
+    if (room.status === 'waiting_for_opponent' && pvpState.role === 'host') {
+      setPvpLobbyView('created');
+    } else if (room.status !== 'waiting_for_opponent' && !autoMatchSearch.active && !pvpState.localRoundStarted) {
+      setPvpLobbyView('status');
+    }
+  }
   if (room.status === 'abandoned' && prevStatus && prevStatus !== 'abandoned') {
     showToast('Room closed', 2500);
     resetPvpStateLocal();
@@ -1565,6 +1610,14 @@ function applyLang() {
   setText('pvp-bestof-label', 'pvpBestOf');
   setText('btn-create-room', 'pvpCreateRoom');
   setText('btn-join-room', 'pvpJoinByCode');
+  setText('pvp-searching-title', 'pvpSearchingTitle');
+  setText('pvp-searching-subtitle', 'pvpSearchingSub');
+  setText('pvp-created-title', 'pvpCreatedTitle');
+  setText('pvp-created-subtitle', 'pvpCreatedSub');
+  setText('btn-pvp-search-cancel', 'pvpCancel');
+  setText('btn-pvp-search-code', 'pvpJoinByCode');
+  setText('btn-pvp-created-cancel', 'pvpCancel');
+  setText('pvp-created-code-label', 'pvpCodeLabel');
   setText('btn-pvp-leave', 'pvpLeave');
   setText('btn-pvp-round-back', 'pvpBackToPvp');
   setText('btn-leaderboard', 'leaderboard');
@@ -1604,6 +1657,7 @@ function applyLang() {
     }
   });
   updatePvpBestOfHint();
+  updatePvpCreatedPanel();
   updatePvpPlayerMeta();
   updatePvpCompetitionUi();
   updateAuthUi();
@@ -1769,6 +1823,8 @@ async function createRoomMvp() {
     opponentName: null,
   };
   applyRoomToPvpState(room, 'host');
+  updatePvpCreatedPanel();
+  setPvpLobbyView('created');
   await watchPvpRoom(room.id);
   showToast(`Room created: ${room.room_code}`, 3000);
 }
@@ -1781,14 +1837,22 @@ async function joinRoomRecordMvp(room) {
   if (room.host_player_id === playerId) throw new Error('This device is already the host');
   if (room.guest_player_id && room.guest_player_id !== playerId) throw new Error('Room already has guest');
 
-  const { error: updateErr } = await sb
+  const isReconnectGuest = room.guest_player_id && room.guest_player_id === playerId;
+  let claimQuery = sb
     .from('rooms')
     .update({
       guest_player_id: playerId,
       status: 'ready',
     })
     .eq('id', room.id);
+  if (!isReconnectGuest) {
+    claimQuery = claimQuery
+      .eq('status', 'waiting_for_opponent')
+      .is('guest_player_id', null);
+  }
+  const { data: claimedRoom, error: updateErr } = await claimQuery.select().maybeSingle();
   if (updateErr) throw new Error(updateErr.message);
+  if (!claimedRoom) throw new Error(t('pvpRoomUnavailable'));
 
   const { error: playerErr } = await sb
     .from('room_players')
@@ -1804,19 +1868,20 @@ async function joinRoomRecordMvp(room) {
 
   pvpState = {
     roomId: room.id,
-    roomCode: room.room_code,
+    roomCode: claimedRoom.room_code,
     role: 'guest',
     status: 'ready',
-    mode: room.mode,
-    bestOf: room.best_of,
-    colorsCount: room.colors_count,
+    mode: claimedRoom.mode,
+    bestOf: claimedRoom.best_of,
+    colorsCount: claimedRoom.colors_count,
     localRoundStarted: false,
     myName: getCurrentPlayerNickname() || null,
     opponentName: null,
   };
-  applyRoomToPvpState({ ...room, status: 'ready', guest_player_id: playerId }, 'guest');
+  applyRoomToPvpState(claimedRoom, 'guest');
+  setPvpLobbyView('status');
   await watchPvpRoom(room.id);
-  showToast(`Joined: ${room.room_code}`, 3000);
+  showToast(`Joined: ${claimedRoom.room_code}`, 3000);
 }
 
 async function joinRoomByCodeMvp() {
@@ -1859,10 +1924,24 @@ async function findMatchMvp() {
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  const room = (data || []).find(r => r.host_player_id !== playerId);
-  if (!room) throw new Error(t('findNoRooms'));
-  showToast(`${t('matchFound')}: ${room.room_code}`, 1800);
-  await joinRoomRecordMvp(room);
+  const rooms = (data || []).filter(r => r.host_player_id !== playerId);
+  if (!rooms.length) throw new Error(t('findNoRooms'));
+  let lastErr = null;
+  for (const room of rooms) {
+    try {
+      showToast(`${t('matchFound')}: ${room.room_code}`, 1200);
+      await joinRoomRecordMvp(room);
+      return;
+    } catch (err) {
+      lastErr = err;
+      if ((err?.message || '') === t('pvpRoomUnavailable')) {
+        setPvpFindStatus(t('pvpRoomTaken'));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(lastErr?.message || t('findNoRooms'));
 }
 
 async function autoFindMatchTick() {
@@ -1886,11 +1965,13 @@ function toggleAutoMatchSearch() {
   if (autoMatchSearch.active) {
     stopAutoMatchSearch();
     setPvpFindStatus('');
+    setPvpLobbyView('join');
     return;
   }
   autoMatchSearch.active = true;
   document.getElementById('btn-find-match').textContent = t('stopSearch');
   setPvpFindStatus(getPvpFindSettings().strategy === 'exact' ? t('searchingBySettings') : t('searching'));
+  setPvpLobbyView('searching');
   autoFindMatchTick();
 }
 
@@ -1927,6 +2008,21 @@ function initPvpMvp() {
   document.getElementById('btn-pvp-open-join').addEventListener('click', () => setPvpLobbyView('join'));
   document.getElementById('btn-pvp-create-back').addEventListener('click', () => setPvpLobbyView('menu'));
   document.getElementById('btn-pvp-join-back').addEventListener('click', () => setPvpLobbyView('menu'));
+  document.getElementById('btn-pvp-search-cancel').addEventListener('click', () => {
+    stopAutoMatchSearch();
+    setPvpFindStatus('');
+    setPvpLobbyView('join');
+  });
+  document.getElementById('btn-pvp-search-code').addEventListener('click', () => {
+    stopAutoMatchSearch();
+    setPvpFindStatus('');
+    setPvpLobbyView('join');
+    document.getElementById('pvp-room-code').focus();
+  });
+  document.getElementById('btn-pvp-created-cancel').addEventListener('click', async () => {
+    await leavePvpSession();
+    setPvpLobbyView('menu');
+  });
   document.getElementById('pvp-bestof').addEventListener('change', updatePvpBestOfHint);
   document.getElementById('pvp-find-mode-select').addEventListener('change', updatePvpFindUi);
   ['pvp-mode', 'pvp-colors', 'pvp-bestof'].forEach(id => {
