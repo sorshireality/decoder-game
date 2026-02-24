@@ -32,22 +32,33 @@ const LEVEL_PRESETS_V1 = [
   { stage: 2, colors: 5, paletteColors: 6, attempts: 8 },  // 15
 ];
 
-// LEVELS v2 (backward-compatible rollout)
-// This is the new source-of-truth shape for future stages/mechanics.
-const LEVELS_V2 = LEVEL_PRESETS_V1.map((cfg, idx) => {
+const STAGE3_REPEATS_PRESETS = [
+  { stage: 3, colors: 3, paletteColors: 3, attempts: 8 },
+  { stage: 3, colors: 3, paletteColors: 3, attempts: 7 },
+  { stage: 3, colors: 4, paletteColors: 4, attempts: 8 },
+  { stage: 3, colors: 4, paletteColors: 4, attempts: 7 },
+  { stage: 3, colors: 4, paletteColors: 4, attempts: 6 },
+  { stage: 3, colors: 5, paletteColors: 5, attempts: 8 },
+  { stage: 3, colors: 5, paletteColors: 5, attempts: 7 },
+  { stage: 3, colors: 5, paletteColors: 5, attempts: 6 },
+];
+
+function buildLevelV2Entry(cfg, idx, feature = 'none', featureConfig = {}) {
   const globalLevel = idx + 1;
-  const stageLevel = cfg.stage === 2 ? globalLevel - 10 : globalLevel;
+  const stageLevel = cfg.stage === 2 ? globalLevel - 10 : (
+    cfg.stage === 1 ? globalLevel : null
+  );
   const mode = cfg.stage === 2 ? 'plus_one' : 'classic';
   const stageBasePoints = 10 + (cfg.stage - 1) * 5;
-  const levelCoefficient = 1 + (stageLevel - 1) * 0.12;
+  const levelCoefficient = 1 + (((stageLevel ?? 1) - 1) * 0.12);
   return {
-    id: `stage${cfg.stage}-lvl${stageLevel}`,
+    id: `stage${cfg.stage}-lvl${stageLevel ?? 'x'}`,
     globalLevel,
     stage: cfg.stage,
     stageLevel,
     mode,
-    feature: 'none',
-    featureConfig: {},
+    feature,
+    featureConfig,
     game: {
       stage: cfg.stage,
       colors: cfg.colors,
@@ -59,7 +70,21 @@ const LEVELS_V2 = LEVEL_PRESETS_V1.map((cfg, idx) => {
       levelCoefficient,
     },
   };
-});
+}
+
+// LEVELS v2 (backward-compatible rollout)
+// This is the new source-of-truth shape for future stages/mechanics.
+const LEVELS_V2 = [
+  ...LEVEL_PRESETS_V1.map((cfg, idx) => buildLevelV2Entry(cfg, idx, 'none', {})),
+  ...STAGE3_REPEATS_PRESETS.map((cfg, localIdx) => {
+    const idx = LEVEL_PRESETS_V1.length + localIdx;
+    const entry = buildLevelV2Entry(cfg, idx, 'repeats', { allowDuplicates: true });
+    entry.stageLevel = localIdx + 1;
+    entry.id = `stage${cfg.stage}-lvl${entry.stageLevel}`;
+    entry.scoring.levelCoefficient = 1 + (localIdx * 0.12);
+    return entry;
+  }),
+];
 
 // Legacy-compatible flattened view (kept to avoid breaking current game flow).
 const LEVELS = LEVELS_V2.map(lvl => lvl.game);
@@ -160,9 +185,12 @@ const I18N = {
     selectLevel:      'Select Level',
     stageName:        n => `Stage ${n}`,
     stage2desc:       'Palette has one decoy color',
+    stage3desc:       'Repeats are allowed in the secret code',
     levelHeader:      (cfg, stageLvl) =>
       cfg.stage === 2
         ? `Stage 2 · Lv.${stageLvl} · ${cfg.colors}+1`
+        : cfg.stage === 3
+          ? `Stage 3 · Lv.${stageLvl} · Repeats`
         : `Level ${stageLvl} · ${cfg.colors} colors`,
     attemptsLeft:     n => `Attempts: <span class="attempts-num">${n}</span>`,
     paletteHint:      'Choose a color, tap a slot',
@@ -257,9 +285,12 @@ const I18N = {
     selectLevel:      'Вибір рівня',
     stageName:        n => `Стадія ${n}`,
     stage2desc:       'У палітрі є один зайвий колір',
+    stage3desc:       'У секретному коді дозволені повтори',
     levelHeader:      (cfg, stageLvl) =>
       cfg.stage === 2
         ? `Стадія 2 · Рів.${stageLvl} · ${cfg.colors}+1`
+        : cfg.stage === 3
+          ? `Стадія 3 · Рів.${stageLvl} · Повтори`
         : `Рівень ${stageLvl} · ${cfg.colors} кол.`,
     attemptsLeft:     n => `Спроб: <span class="attempts-num">${n}</span>`,
     paletteHint:      'Вибери колір, натисни комірку',
@@ -563,8 +594,16 @@ function shuffle(arr) {
 }
 
 // For stage 2: secret picks `colors` colors from pool of `paletteColors`
-function generateSecret(cfg) {
-  const pool = shuffle(COLORS.slice(0, cfg.paletteColors).map(c => c.id));
+function generateSecret(cfg, featureConfig = {}) {
+  const palette = COLORS.slice(0, cfg.paletteColors).map(c => c.id);
+  if (featureConfig.allowDuplicates) {
+    const secret = [];
+    for (let i = 0; i < cfg.colors; i++) {
+      secret.push(palette[Math.floor(Math.random() * palette.length)]);
+    }
+    return secret;
+  }
+  const pool = shuffle(palette);
   return pool.slice(0, cfg.colors);
 }
 
@@ -1927,7 +1966,11 @@ function renderLevelSelect() {
   const container = document.getElementById('levels-container');
   container.innerHTML = '';
 
-  [1, 2].forEach(stageId => {
+  const stageIds = Object.keys(LEVEL_STAGE_SUMMARY_V2)
+    .map(Number)
+    .sort((a, b) => a - b);
+
+  stageIds.forEach(stageId => {
     const section = document.createElement('div');
     section.className = 'stage-section';
 
@@ -1939,10 +1982,10 @@ function renderLevelSelect() {
     title.textContent = t('stageName', stageId);
     header.appendChild(title);
 
-    if (stageId === 2) {
+    if (stageId === 2 || stageId === 3) {
       const desc = document.createElement('span');
       desc.className = 'stage-header-desc';
-      desc.textContent = t('stage2desc');
+      desc.textContent = t(stageId === 2 ? 'stage2desc' : 'stage3desc');
       header.appendChild(desc);
     }
 
@@ -1986,9 +2029,10 @@ function renderLevelSelect() {
 
 // ---- GAME ----
 function startLevel(lvl) {
-  const cfg = LEVELS[lvl - 1];
+  const lvlV2 = getLevelV2(lvl);
+  const cfg = lvlV2?.game || LEVELS[lvl - 1];
   state.currentLevel      = lvl;
-  state.secret            = generateSecret(cfg);
+  state.secret            = generateSecret(cfg, lvlV2?.featureConfig || {});
   state.guess             = new Array(cfg.colors).fill(null);
   state.history           = [];
   state.attemptsLeft      = cfg.attempts;
