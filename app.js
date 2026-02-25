@@ -43,6 +43,33 @@ const STAGE3_REPEATS_PRESETS = [
   { stage: 3, colors: 5, paletteColors: 5, attempts: 6 },
 ];
 
+const STAGE4_FOG_PRESETS = [
+  { stage: 4, colors: 4, paletteColors: 4, attempts: 8 },
+  { stage: 4, colors: 4, paletteColors: 4, attempts: 7 },
+  { stage: 4, colors: 5, paletteColors: 5, attempts: 8 },
+  { stage: 4, colors: 5, paletteColors: 5, attempts: 7 },
+  { stage: 4, colors: 5, paletteColors: 5, attempts: 6 },
+  { stage: 4, colors: 6, paletteColors: 6, attempts: 7 },
+];
+
+const STAGE5_FREEZE_PRESETS = [
+  { stage: 5, colors: 4, paletteColors: 4, attempts: 8 },
+  { stage: 5, colors: 4, paletteColors: 4, attempts: 7 },
+  { stage: 5, colors: 5, paletteColors: 5, attempts: 8 },
+  { stage: 5, colors: 5, paletteColors: 5, attempts: 7 },
+  { stage: 5, colors: 5, paletteColors: 5, attempts: 6 },
+  { stage: 5, colors: 6, paletteColors: 6, attempts: 7 },
+];
+
+const STAGE6_CHAIN_PRESETS = [
+  { stage: 6, colors: 4, paletteColors: 4, attempts: 7, chainRounds: 2 },
+  { stage: 6, colors: 4, paletteColors: 4, attempts: 7, chainRounds: 3 },
+  { stage: 6, colors: 5, paletteColors: 5, attempts: 8, chainRounds: 3 },
+  { stage: 6, colors: 5, paletteColors: 5, attempts: 7, chainRounds: 3 },
+  { stage: 6, colors: 5, paletteColors: 5, attempts: 7, chainRounds: 4 },
+  { stage: 6, colors: 6, paletteColors: 6, attempts: 8, chainRounds: 4 },
+];
+
 function buildLevelV2Entry(cfg, idx, feature = 'none', featureConfig = {}) {
   const globalLevel = idx + 1;
   const stageLevel = cfg.stage === 2 ? globalLevel - 10 : (
@@ -74,16 +101,33 @@ function buildLevelV2Entry(cfg, idx, feature = 'none', featureConfig = {}) {
 
 // LEVELS v2 (backward-compatible rollout)
 // This is the new source-of-truth shape for future stages/mechanics.
-const LEVELS_V2 = [
-  ...LEVEL_PRESETS_V1.map((cfg, idx) => buildLevelV2Entry(cfg, idx, 'none', {})),
-  ...STAGE3_REPEATS_PRESETS.map((cfg, localIdx) => {
-    const idx = LEVEL_PRESETS_V1.length + localIdx;
-    const entry = buildLevelV2Entry(cfg, idx, 'repeats', { allowDuplicates: true });
+function appendStageEntries(baseLen, presets, feature, featureConfigFactory) {
+  return presets.map((cfg, localIdx) => {
+    const idx = baseLen + localIdx;
+    const entry = buildLevelV2Entry(cfg, idx, feature, featureConfigFactory(cfg, localIdx));
     entry.stageLevel = localIdx + 1;
     entry.id = `stage${cfg.stage}-lvl${entry.stageLevel}`;
     entry.scoring.levelCoefficient = 1 + (localIdx * 0.12);
     return entry;
-  }),
+  });
+}
+
+const LEVELS_V2 = [
+  ...LEVEL_PRESETS_V1.map((cfg, idx) => buildLevelV2Entry(cfg, idx, 'none', {})),
+  ...appendStageEntries(LEVEL_PRESETS_V1.length, STAGE3_REPEATS_PRESETS, 'repeats', () => ({ allowDuplicates: true })),
+  ...appendStageEntries(LEVEL_PRESETS_V1.length + STAGE3_REPEATS_PRESETS.length, STAGE4_FOG_PRESETS, 'fog', () => ({ visibleHistory: 3 })),
+  ...appendStageEntries(
+    LEVEL_PRESETS_V1.length + STAGE3_REPEATS_PRESETS.length + STAGE4_FOG_PRESETS.length,
+    STAGE5_FREEZE_PRESETS,
+    'freeze',
+    () => ({ freezeStartsAfterGuess: 1, freezeDurationTurns: 1 })
+  ),
+  ...appendStageEntries(
+    LEVEL_PRESETS_V1.length + STAGE3_REPEATS_PRESETS.length + STAGE4_FOG_PRESETS.length + STAGE5_FREEZE_PRESETS.length,
+    STAGE6_CHAIN_PRESETS,
+    'chain',
+    (cfg) => ({ chainRounds: cfg.chainRounds || 2 })
+  ),
 ];
 
 // Legacy-compatible flattened view (kept to avoid breaking current game flow).
@@ -207,9 +251,12 @@ const I18N = {
     pvpRoleHost:      'Host',
     pvpRoleGuest:     'Guest',
     selectLevel:      'Select Level',
-    stageName:        n => `Stage ${n}`,
+    stageName:        n => `Stage ${n}: ${({1:'Classic',2:'Decoy',3:'Repeats',4:'Fog',5:'Freeze',6:'Chain'}[n] || 'Mode')}`,
     stage2desc:       'Palette has one decoy color',
     stage3desc:       'Repeats are allowed in the secret code',
+    stage4desc:       'Only last 3 attempts are visible',
+    stage5desc:       'A random slot freezes each turn (from turn 2)',
+    stage6desc:       'Win a chain of rounds with fewer attempts each round',
     levelHeader:      (cfg, stageLvl) =>
       cfg.stage === 2
         ? `Stage 2 · Lv.${stageLvl} · ${cfg.colors}+1`
@@ -328,9 +375,12 @@ const I18N = {
     pvpRoleHost:      'Ведучий',
     pvpRoleGuest:     'Гість',
     selectLevel:      'Вибір рівня',
-    stageName:        n => `Стадія ${n}`,
+    stageName:        n => `Стадія ${n}: ${({1:'Класика',2:'Зайвий',3:'Повтори',4:'Туман',5:'Замороження',6:'Ланцюг'}[n] || 'Режим')}`,
     stage2desc:       'У палітрі є один зайвий колір',
     stage3desc:       'У секретному коді дозволені повтори',
+    stage4desc:       'Видно лише останні 3 спроби',
+    stage5desc:       'Випадкова комірка заморожується щоходу (з 2-го ходу)',
+    stage6desc:       'Ланцюг раундів із меншим числом спроб',
     levelHeader:      (cfg, stageLvl) =>
       cfg.stage === 2
         ? `Стадія 2 · Рів.${stageLvl} · ${cfg.colors}+1`
@@ -376,6 +426,8 @@ let state = {
   hasAbility:         false,
   abilityAvailable:   false,
   revealedPositions:  [],   // [{index, colorId}]
+  frozenSlotIndex:    null,
+  chain:              null, // { totalRounds, roundIndex, baseAttempts }
   awardedMainLevels:  [],
 };
 
@@ -746,6 +798,19 @@ function getLevelV2(globalLevel) {
   return LEVELS_V2[globalLevel - 1] || null;
 }
 
+function getCurrentLevelV2() {
+  if (!state.currentLevel) return null;
+  return getLevelV2(state.currentLevel);
+}
+
+function getCurrentFeature() {
+  return getCurrentLevelV2()?.feature || 'none';
+}
+
+function getCurrentFeatureConfig() {
+  return getCurrentLevelV2()?.featureConfig || {};
+}
+
 function calculateMainGamePoints(levelNumber) {
   const lvl = getLevelV2(levelNumber);
   if (!lvl) return 0;
@@ -879,6 +944,81 @@ function generateSecret(cfg, featureConfig = {}) {
 
 function countCorrect(secret, guess) {
   return secret.reduce((acc, c, i) => acc + (c === guess[i] ? 1 : 0), 0);
+}
+
+function getRandomInt(max) {
+  return Math.floor(Math.random() * max);
+}
+
+function sampleIndices(count, maxExclusive) {
+  const all = Array.from({ length: maxExclusive }, (_, i) => i);
+  const shuffled = shuffle(all);
+  return shuffled.slice(0, Math.max(0, Math.min(count, maxExclusive)));
+}
+
+function applyFreezeForNextTurn(cfg) {
+  if (getCurrentFeature() !== 'freeze') {
+    state.frozenSlotIndex = null;
+    return;
+  }
+  if (state.history.length < 1) {
+    state.frozenSlotIndex = null;
+    return;
+  }
+  const blocked = new Set(state.revealedPositions.map(r => r.index));
+  const candidates = [];
+  for (let i = 0; i < cfg.colors; i++) {
+    if (!blocked.has(i)) candidates.push(i);
+  }
+  if (!candidates.length) {
+    state.frozenSlotIndex = null;
+    return;
+  }
+  state.frozenSlotIndex = candidates[getRandomInt(candidates.length)];
+  state.guess[state.frozenSlotIndex] = null;
+}
+
+function initChainStateForLevel() {
+  const lvlV2 = getCurrentLevelV2();
+  if (!lvlV2 || lvlV2.feature !== 'chain') {
+    state.chain = null;
+    return;
+  }
+  const rounds = Math.max(2, Number(lvlV2.featureConfig?.chainRounds || 2));
+  state.chain = {
+    totalRounds: rounds,
+    roundIndex: 1,
+    baseAttempts: LEVELS[state.currentLevel - 1].attempts,
+  };
+}
+
+function setupChainRound(roundIndex, cfg) {
+  state.history = [];
+  state.selectedColor = null;
+  state.gameOver = false;
+  state.frozenSlotIndex = null;
+  state.secret = generateSecret(cfg, getCurrentFeatureConfig());
+  state.guess = new Array(cfg.colors).fill(null);
+  state.revealedPositions = [];
+  const attempts = Math.max(1, cfg.attempts - Math.max(0, roundIndex - 1));
+  state.attemptsLeft = attempts;
+  const presetReveals = Math.max(0, roundIndex - 1);
+  if (presetReveals > 0) {
+    sampleIndices(Math.min(presetReveals, cfg.colors - 1), cfg.colors).forEach(index => {
+      state.revealedPositions.push({ index, colorId: state.secret[index] });
+      state.guess[index] = state.secret[index];
+    });
+  }
+}
+
+function advanceChainRoundOrFinish(cfg) {
+  if (!state.chain) return false;
+  if (state.chain.roundIndex >= state.chain.totalRounds) return false;
+  state.chain.roundIndex += 1;
+  setupChainRound(state.chain.roundIndex, cfg);
+  renderGame();
+  showToast(`Chain ${state.chain.roundIndex}/${state.chain.totalRounds}`, 1600);
+  return true;
 }
 
 // Returns the display level number within the stage (1-based)
@@ -2482,10 +2622,17 @@ function renderLevelSelect() {
     title.textContent = t('stageName', stageId);
     header.appendChild(title);
 
-    if (stageId === 2 || stageId === 3) {
+    if ([2, 3, 4, 5, 6].includes(stageId)) {
       const desc = document.createElement('span');
       desc.className = 'stage-header-desc';
-      desc.textContent = t(stageId === 2 ? 'stage2desc' : 'stage3desc');
+      const descKey = ({
+        2: 'stage2desc',
+        3: 'stage3desc',
+        4: 'stage4desc',
+        5: 'stage5desc',
+        6: 'stage6desc',
+      })[stageId];
+      desc.textContent = t(descKey);
       header.appendChild(desc);
     }
 
@@ -2540,6 +2687,12 @@ function startLevel(lvl) {
   state.gameOver          = false;
   state.abilityAvailable  = isPvpModeActive() ? false : state.hasAbility;
   state.revealedPositions = [];
+  state.frozenSlotIndex   = null;
+  state.chain             = null;
+  initChainStateForLevel();
+  if (state.chain) {
+    setupChainRound(state.chain.roundIndex, cfg);
+  }
   if (isPvpModeActive()) {
     pvpState.localRoundStarted = true;
     pvpState.pendingRoundResult = null;
@@ -2552,9 +2705,12 @@ function startLevel(lvl) {
 function renderGame() {
   const cfg = LEVELS[state.currentLevel - 1];
   const stageLvl = stageLvlNum(state.currentLevel);
-  const gameLabel = isDailyModeActive()
+  let gameLabel = isDailyModeActive()
     ? `${t('dailyBadge')} · ${t('levelHeader', cfg, stageLvl)}`
     : t('levelHeader', cfg, stageLvl);
+  if (state.chain) {
+    gameLabel += ` · Chain ${state.chain.roundIndex}/${state.chain.totalRounds}`;
+  }
   document.getElementById('game-level-label').textContent = gameLabel;
   document.getElementById('game-attempts').innerHTML = t('attemptsLeft', state.attemptsLeft);
   document.getElementById('palette-hint').textContent = t('paletteHint');
@@ -2572,8 +2728,13 @@ function renderHistory() {
   const area = document.getElementById('history-area');
   area.innerHTML = '';
   const cfg = LEVELS[state.currentLevel - 1];
+  const feature = getCurrentFeature();
+  const visibleHistory = feature === 'fog'
+    ? (getCurrentFeatureConfig().visibleHistory || 3)
+    : state.history.length;
+  const entries = state.history.slice(-visibleHistory);
 
-  state.history.forEach(entry => {
+  entries.forEach(entry => {
     const row = document.createElement('div');
     row.className = 'history-row';
 
@@ -2603,11 +2764,13 @@ function renderGuessRow() {
 
   state.guess.forEach((cid, idx) => {
     const isRevealed = state.revealedPositions.some(r => r.index === idx);
+    const isFrozen = state.frozenSlotIndex === idx && !isRevealed;
     const slot = document.createElement('div');
     slot.className = 'guess-slot';
     if (cid) slot.classList.add('filled', `color-${cid}`);
     if (isRevealed) slot.classList.add('revealed');
-    if (!isRevealed) slot.addEventListener('click', () => onSlotClick(idx));
+    if (isFrozen) slot.classList.add('frozen');
+    if (!isRevealed && !isFrozen) slot.addEventListener('click', () => onSlotClick(idx));
     row.appendChild(slot);
   });
 }
@@ -2641,6 +2804,7 @@ function onPaletteClick(colorId) {
 function onSlotClick(idx) {
   if (state.gameOver) return;
   if (state.revealedPositions.some(r => r.index === idx)) return;
+  if (state.frozenSlotIndex === idx) return;
   state.guess[idx] = state.selectedColor || null;
   renderGuessRow();
   updateConfirmBtn();
@@ -2665,7 +2829,8 @@ function useAbility() {
 
   const available = state.secret
     .map((colorId, index) => ({ index, colorId }))
-    .filter(({ index }) => !state.revealedPositions.some(r => r.index === index));
+    .filter(({ index }) => !state.revealedPositions.some(r => r.index === index))
+    .filter(({ index }) => state.frozenSlotIndex !== index);
 
   if (available.length === 0) return;
 
@@ -2720,8 +2885,14 @@ async function onConfirm() {
     return;
   }
 
+  if (won && state.chain) {
+    const advanced = advanceChainRoundOrFinish(cfg);
+    if (advanced) return;
+  }
+
   if (won || lost) {
     state.gameOver = true;
+    state.frozenSlotIndex = null;
     let abilityJustUnlocked = false;
     let stage2JustUnlocked = false;
 
@@ -2759,6 +2930,8 @@ async function onConfirm() {
   } else {
     state.guess = new Array(cfg.colors).fill(null);
     // Persist revealed positions into next attempt
+    state.revealedPositions.forEach(r => { state.guess[r.index] = r.colorId; });
+    applyFreezeForNextTurn(cfg);
     state.revealedPositions.forEach(r => { state.guess[r.index] = r.colorId; });
     state.selectedColor = null;
     renderGame();
