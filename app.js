@@ -70,6 +70,15 @@ const STAGE6_CHAIN_PRESETS = [
   { stage: 6, colors: 6, paletteColors: 6, attempts: 8, chainRounds: 4 },
 ];
 
+const FEATURE_SCORE_MULTIPLIERS = {
+  none: 1.0,
+  repeats: 1.05,
+  fog: 1.15,
+  freeze: 1.20,
+  chain: 1.30,
+  double_code: 1.35,
+};
+
 function buildLevelV2Entry(cfg, idx, feature = 'none', featureConfig = {}) {
   const globalLevel = idx + 1;
   const stageLevel = cfg.stage === 2 ? globalLevel - 10 : (
@@ -78,6 +87,7 @@ function buildLevelV2Entry(cfg, idx, feature = 'none', featureConfig = {}) {
   const mode = cfg.stage === 2 ? 'plus_one' : 'classic';
   const stageBasePoints = 10 + (cfg.stage - 1) * 5;
   const levelCoefficient = 1 + (((stageLevel ?? 1) - 1) * 0.12);
+  const featureMultiplier = FEATURE_SCORE_MULTIPLIERS[feature] || 1;
   return {
     id: `stage${cfg.stage}-lvl${stageLevel ?? 'x'}`,
     globalLevel,
@@ -95,6 +105,7 @@ function buildLevelV2Entry(cfg, idx, feature = 'none', featureConfig = {}) {
     scoring: {
       stageBasePoints,
       levelCoefficient,
+      featureMultiplier,
     },
   };
 }
@@ -251,7 +262,7 @@ const I18N = {
     pvpRoleHost:      'Host',
     pvpRoleGuest:     'Guest',
     selectLevel:      'Select Level',
-    stageName:        n => `Stage ${n}: ${({1:'Classic',2:'Decoy',3:'Repeats',4:'Fog',5:'Freeze',6:'Chain'}[n] || 'Mode')}`,
+    stageName:        n => `${({1:'Classic',2:'Decoy',3:'Repeats',4:'Fog',5:'Freeze',6:'Chain'}[n] || `Stage ${n}`)}`,
     stage2desc:       'Palette has one decoy color',
     stage3desc:       'Repeats are allowed in the secret code',
     stage4desc:       'Only last 3 attempts are visible',
@@ -375,7 +386,7 @@ const I18N = {
     pvpRoleHost:      'Ведучий',
     pvpRoleGuest:     'Гість',
     selectLevel:      'Вибір рівня',
-    stageName:        n => `Стадія ${n}: ${({1:'Класика',2:'Зайвий',3:'Повтори',4:'Туман',5:'Замороження',6:'Ланцюг'}[n] || 'Режим')}`,
+    stageName:        n => `${({1:'Класика',2:'Зайвий',3:'Повтори',4:'Туман',5:'Замороження',6:'Ланцюг'}[n] || `Стадія ${n}`)}`,
     stage2desc:       'У палітрі є один зайвий колір',
     stage3desc:       'У секретному коді дозволені повтори',
     stage4desc:       'Видно лише останні 3 спроби',
@@ -814,7 +825,11 @@ function getCurrentFeatureConfig() {
 function calculateMainGamePoints(levelNumber) {
   const lvl = getLevelV2(levelNumber);
   if (!lvl) return 0;
-  return Math.round(lvl.scoring.stageBasePoints * lvl.scoring.levelCoefficient);
+  return Math.round(
+    lvl.scoring.stageBasePoints *
+    lvl.scoring.levelCoefficient *
+    (lvl.scoring.featureMultiplier || 1)
+  );
 }
 
 async function syncLocalScoreToCloud() {
@@ -956,7 +971,7 @@ function sampleIndices(count, maxExclusive) {
   return shuffled.slice(0, Math.max(0, Math.min(count, maxExclusive)));
 }
 
-function applyFreezeForNextTurn(cfg) {
+function applyFreezeForNextTurn(cfg, previousGuess = null) {
   if (getCurrentFeature() !== 'freeze') {
     state.frozenSlotIndex = null;
     return;
@@ -975,7 +990,9 @@ function applyFreezeForNextTurn(cfg) {
     return;
   }
   state.frozenSlotIndex = candidates[getRandomInt(candidates.length)];
-  state.guess[state.frozenSlotIndex] = null;
+  if (previousGuess && previousGuess[state.frozenSlotIndex] != null) {
+    state.guess[state.frozenSlotIndex] = previousGuess[state.frozenSlotIndex];
+  }
 }
 
 function initChainStateForLevel() {
@@ -2928,10 +2945,11 @@ async function onConfirm() {
       }
     }, 600);
   } else {
+    const previousGuess = [...state.guess];
     state.guess = new Array(cfg.colors).fill(null);
     // Persist revealed positions into next attempt
     state.revealedPositions.forEach(r => { state.guess[r.index] = r.colorId; });
-    applyFreezeForNextTurn(cfg);
+    applyFreezeForNextTurn(cfg, previousGuess);
     state.revealedPositions.forEach(r => { state.guess[r.index] = r.colorId; });
     state.selectedColor = null;
     renderGame();
