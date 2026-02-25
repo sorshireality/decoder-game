@@ -47,13 +47,14 @@
 
 1. `home-screen`
 2. `leaderboard-screen` (глобальный рейтинг `Top 10` по `rating_score`)
-3. `pvp-screen` (MVP PvP-лобби: упрощенный вход `Find Match` / `Create`, create/join/search/wait panels)
-4. `level-screen`
-5. `game-screen` (single-player и PvP, с PvP competition overlay в правом верхнем углу)
-6. `pvp-vs-screen` (pre-match экран синхронизации/представления игроков перед стартом дуэли)
-7. `pvp-round-screen` (быстрый экран между раундами PvP: `Next/Retry`)
-8. `result-screen` (solo result + финальный PvP `Victory/Defeat`)
-9. `toast` (overlay-уведомления)
+3. `Daily` запускается с `home-screen` кнопкой `Daily / Щоденна` (отдельного экрана пока нет; использует общий `game-screen` и `result-screen`)
+4. `pvp-screen` (MVP PvP-лобби: упрощенный вход `Find Match` / `Create`, create/join/search/wait panels)
+5. `level-screen`
+6. `game-screen` (single-player / Daily / PvP, с PvP competition overlay в правом верхнем углу)
+7. `pvp-vs-screen` (pre-match экран синхронизации/представления игроков перед стартом дуэли)
+8. `pvp-round-screen` (быстрый экран между раундами PvP: `Next/Retry`)
+9. `result-screen` (solo result + Daily result + финальный PvP `Victory/Defeat`)
+10. `toast` (overlay-уведомления)
 
 ## Геймплей (текущая реализация)
 
@@ -66,6 +67,17 @@
 - История попыток отображает:
   - набор выбранных цветов
   - результат в формате `X/N`
+
+### Daily Challenge (MVP)
+
+- Один общий daily-челлендж в день для всех игроков (детерминированный seed по дате, `UTC`, `daily:<YYYY-MM-DD>:v1`).
+- Одна **зачетная** попытка в день (win или loss закрывает daily до следующего дня).
+- Daily запускается с `home-screen` кнопкой `Daily / Щоденна`.
+- Daily сейчас использует расширяемый пул шаблонов `DAILY_CHALLENGE_POOL` (`kind: preset_level`) и выбирает из готовых уровней/механик (`Stage 1/2/3`, включая `+1` и `Repeats`).
+- Формула награды за прохождение daily:
+  - `15` базовых очков
+  - `+5` за каждую неиспользованную попытку (`attemptsLeft`)
+- Daily результат и факт использования зачетной попытки хранятся локально в `decoder_daily_state` (MVP).
 
 ## Цвета (доступные в проекте)
 
@@ -233,6 +245,9 @@ PvP UX (текущее состояние):
   - загрузка `player_scores` + `profiles` (nickname/email)
   - подсветка текущего авторизованного игрока
 - Для работы глобального рейтинга между разными пользователями нужны публичные `SELECT`-policy на `profiles` и `player_scores` (добавлены в `SUPABASE_AUTH_MVP.sql`, требуется выполнить SQL повторно).
+- Daily очки (MVP):
+  - при успешном прохождении начисляются в `player_scores.daily_score` и `rating_score` (если игрок авторизован через Google)
+  - локально также увеличивают отображаемый счет на `home-screen`
 
 ## Известные архитектурные ограничения (текущие)
 

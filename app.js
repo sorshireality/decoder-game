@@ -101,18 +101,29 @@ const MATCHMAKING_ROOM_TTL_MS = 10 * 60 * 1000;
 const STORAGE_KEYS = {
   progress: 'decoder_progress',
   score: 'decoder_score_state',
+  daily: 'decoder_daily_state',
   guestId: 'decoder_guest_id',
   nickname: 'decoder_nickname',
   supabaseCfg: 'decoder_supabase_cfg',
   pvpSession: 'decoder_pvp_session',
 };
 const VERCEL_CONFIG_ENDPOINT = '/api/config';
+const DAILY_UTC_ROLLOVER = true; // one shared challenge key for all users
 
 // ---- I18N ----
 const I18N = {
   en: {
     appSubtitle:      'Crack the secret color code',
     play:             'Play',
+    daily:            'Daily',
+    dailyDone:        'Daily completed',
+    dailyTryTomorrow: 'Come back tomorrow for a new challenge',
+    dailyLocked:      'Daily attempt already used',
+    dailyAward:       pts => `Daily +${pts} pts`,
+    dailyBadge:       'Daily Challenge',
+    dailySolved:      'Daily challenge cleared!',
+    dailyFailed:      'Daily challenge failed',
+    dailyOneAttempt:  'One scored attempt today',
     pvp:              'PVP',
     pvpTitle:         'Duel',
     pvpConnection:    'Connection',
@@ -225,6 +236,15 @@ const I18N = {
   uk: {
     appSubtitle:      'Розгадай таємний колірний код',
     play:             'Грати',
+    daily:            'Щоденна',
+    dailyDone:        'Щоденну загадку пройдено',
+    dailyTryTomorrow: 'Повернись завтра за новим челенджем',
+    dailyLocked:      'Сьогоднішню зараховану спробу вже використано',
+    dailyAward:       pts => `Щоденна +${pts} очк.`,
+    dailyBadge:       'Щоденний челендж',
+    dailySolved:      'Щоденну загадку пройдено!',
+    dailyFailed:      'Щоденний челендж не пройдено',
+    dailyOneAttempt:  'Одна зарахована спроба сьогодні',
     pvp:              'PVP',
     pvpTitle:         'Поєдинок',
     pvpConnection:    'Підключення',
@@ -416,6 +436,21 @@ let leaderboardState = {
 let scoreState = {
   mainGameScore: 0,
 };
+let dailyState = {
+  records: {},
+  active: null, // { dateKey, challenge, pointsAwarded, startedAt }
+};
+
+const DAILY_CHALLENGE_POOL = [
+  { kind: 'preset_level', level: 10, tag: 'classic-hard' },
+  { kind: 'preset_level', level: 12, tag: 'decoy-pressure' },
+  { kind: 'preset_level', level: 14, tag: 'decoy-tight' },
+  { kind: 'preset_level', level: 15, tag: 'decoy-wide' },
+  { kind: 'preset_level', level: 16, tag: 'repeats-intro' },
+  { kind: 'preset_level', level: 18, tag: 'repeats-mid' },
+  { kind: 'preset_level', level: 20, tag: 'repeats-tight' },
+  { kind: 'preset_level', level: 23, tag: 'repeats-hard' },
+];
 
 // ---- STORAGE ----
 function saveProgress() {
@@ -473,6 +508,129 @@ function loadScoreState() {
     scoreState.mainGameScore = Number(d.mainGameScore || 0);
   } catch (_) {
     scoreState.mainGameScore = 0;
+  }
+}
+
+function saveDailyState() {
+  localStorage.setItem(STORAGE_KEYS.daily, JSON.stringify({
+    records: dailyState.records || {},
+  }));
+}
+
+function loadDailyState() {
+  try {
+    const d = JSON.parse(localStorage.getItem(STORAGE_KEYS.daily) || '{}');
+    dailyState.records = (d && typeof d.records === 'object' && d.records) ? d.records : {};
+  } catch (_) {
+    dailyState.records = {};
+  }
+}
+
+function getDailyDateKey(date = new Date()) {
+  if (!DAILY_UTC_ROLLOVER) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+function seededRngFromString(seedStr) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < seedStr.length; i++) {
+    h ^= seedStr.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return function next() {
+    h += 0x6D2B79F5;
+    let t = h;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function getDailyChallengeForDate(dateKey = getDailyDateKey()) {
+  const rng = seededRngFromString(`daily:${dateKey}:v1`);
+  const idx = Math.floor(rng() * DAILY_CHALLENGE_POOL.length);
+  const template = DAILY_CHALLENGE_POOL[idx];
+  if (template.kind === 'preset_level') {
+    const lvlV2 = getLevelV2(template.level);
+    const game = lvlV2?.game || LEVELS[template.level - 1];
+    return {
+      dateKey,
+      id: `${dateKey}:${template.kind}:${template.level}:${template.tag}`,
+      kind: template.kind,
+      tag: template.tag,
+      level: template.level,
+      stage: game.stage,
+      colors: game.colors,
+      attempts: game.attempts,
+      mode: lvlV2?.mode || (game.stage === 2 ? 'plus_one' : 'classic'),
+      feature: lvlV2?.feature || 'none',
+      scoreBase: 15,
+    };
+  }
+  return null;
+}
+
+function getTodayDailyRecord() {
+  return dailyState.records[getDailyDateKey()] || null;
+}
+
+function isDailyModeActive() {
+  return !!dailyState.active;
+}
+
+function clearDailyActiveSession() {
+  dailyState.active = null;
+}
+
+function getDailyPointsReward(attemptsLeft) {
+  return 15 + (Math.max(0, Number(attemptsLeft || 0)) * 5);
+}
+
+function startDailyChallenge() {
+  const todayKey = getDailyDateKey();
+  const existing = dailyState.records[todayKey];
+  if (existing && existing.completed) {
+    showToast(t('dailyLocked'), 2200);
+    return;
+  }
+  const challenge = getDailyChallengeForDate(todayKey);
+  if (!challenge) {
+    showToast('Daily unavailable', 2200);
+    return;
+  }
+  dailyState.active = {
+    dateKey: todayKey,
+    challenge,
+    startedAt: Date.now(),
+    pointsAwarded: false,
+  };
+  startLevel(challenge.level);
+}
+
+function completeDailyChallengeRun(won, attemptsLeft) {
+  const active = dailyState.active;
+  if (!active || !active.challenge) return;
+  const points = won ? getDailyPointsReward(attemptsLeft) : 0;
+  dailyState.records[active.dateKey] = {
+    completed: true,
+    won,
+    challengeId: active.challenge.id,
+    level: active.challenge.level,
+    attemptsLeft: Math.max(0, Number(attemptsLeft || 0)),
+    attemptsTotal: Number(active.challenge.attempts || 0),
+    points,
+    finishedAt: new Date().toISOString(),
+  };
+  saveDailyState();
+  if (won && !active.pointsAwarded && points > 0) {
+    active.pointsAwarded = true;
+    addDailyPoints(points).catch(() => {});
+    showToast(t('dailyAward', points), 2200);
   }
 }
 
@@ -669,6 +827,30 @@ function awardPvpMatchPointsOnce(won) {
   if (pvpState.matchRewardGranted) return;
   pvpState.matchRewardGranted = true;
   addPvpMatchPoints(won).catch(() => {});
+}
+
+async function addDailyPoints(points) {
+  if (!points || points < 1) return;
+  scoreState.mainGameScore += points;
+  saveScoreState();
+  updateHomeScoreUi();
+  if (authState.user) {
+    try {
+      const sb = getSupabaseClient();
+      const { data: cloud } = await sb.from('player_scores').select('*').eq('user_id', authState.user.id).maybeSingle();
+      const nextMain = Number(cloud?.main_game_score || 0);
+      const nextDaily = Number(cloud?.daily_score || 0) + points;
+      const nextPvp = Number(cloud?.pvp_score || 0);
+      await sb.from('player_scores').upsert({
+        user_id: authState.user.id,
+        main_game_score: nextMain,
+        daily_score: nextDaily,
+        pvp_score: nextPvp,
+        rating_score: nextMain + nextDaily + nextPvp,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (_) {}
+  }
 }
 
 // ---- HELPERS ----
@@ -1783,6 +1965,7 @@ function applyLang() {
   if (vsSub) vsSub.textContent = t('pvpVsPreparing');
   if (currentScreen === 'pvp-vs-screen') renderPvpVsScreen();
   setText('btn-pvp-leave', 'pvpLeave');
+  setText('btn-daily', 'daily');
   setText('btn-pvp-round-back', 'pvpBackToPvp');
   setText('btn-leaderboard', 'leaderboard');
   setText('leaderboard-title', 'leaderboard');
@@ -1841,6 +2024,11 @@ function toggleLang() {
       showPvpFinalResult(pvpState.finalResult === 'win');
       return;
     }
+    if (isDailyModeActive()) {
+      const won = !!(getTodayDailyRecord()?.won);
+      showResult(won);
+      return;
+    }
     const cfg = LEVELS[state.currentLevel - 1];
     const won = state.history.length > 0 &&
       state.history[state.history.length - 1].correct === cfg.colors;
@@ -1871,6 +2059,9 @@ function initHome() {
   document.getElementById('btn-play').addEventListener('click', () => {
     renderLevelSelect();
     showScreen('level-screen');
+  });
+  document.getElementById('btn-daily').addEventListener('click', () => {
+    startDailyChallenge();
   });
   document.getElementById('btn-leaderboard').addEventListener('click', async () => {
     showScreen('leaderboard-screen');
@@ -2361,8 +2552,10 @@ function startLevel(lvl) {
 function renderGame() {
   const cfg = LEVELS[state.currentLevel - 1];
   const stageLvl = stageLvlNum(state.currentLevel);
-
-  document.getElementById('game-level-label').textContent = t('levelHeader', cfg, stageLvl);
+  const gameLabel = isDailyModeActive()
+    ? `${t('dailyBadge')} · ${t('levelHeader', cfg, stageLvl)}`
+    : t('levelHeader', cfg, stageLvl);
+  document.getElementById('game-level-label').textContent = gameLabel;
   document.getElementById('game-attempts').innerHTML = t('attemptsLeft', state.attemptsLeft);
   document.getElementById('palette-hint').textContent = t('paletteHint');
   document.getElementById('btn-confirm').textContent = t('confirmGuess');
@@ -2532,7 +2725,7 @@ async function onConfirm() {
     let abilityJustUnlocked = false;
     let stage2JustUnlocked = false;
 
-    if (won && state.currentLevel >= state.unlockedLevel && state.unlockedLevel < LEVELS.length) {
+    if (!isDailyModeActive() && won && state.currentLevel >= state.unlockedLevel && state.unlockedLevel < LEVELS.length) {
       state.unlockedLevel = state.currentLevel + 1;
       if (!state.hasAbility && state.currentLevel === ABILITY_UNLOCK_LEVEL) {
         state.hasAbility = true;
@@ -2544,9 +2737,13 @@ async function onConfirm() {
       saveProgress();
     }
 
-    if (won && markAwardedMainLevel(state.currentLevel)) {
+    if (!isDailyModeActive() && won && markAwardedMainLevel(state.currentLevel)) {
       saveProgress();
       addMainGamePoints(calculateMainGamePoints(state.currentLevel));
+    }
+
+    if (isDailyModeActive()) {
+      completeDailyChallengeRun(won, state.attemptsLeft);
     }
 
     state.guess = new Array(cfg.colors).fill(null);
@@ -2571,12 +2768,18 @@ async function onConfirm() {
 function showResult(won) {
   const cfg = LEVELS[state.currentLevel - 1];
   const stageLvl = stageLvlNum(state.currentLevel);
+  const isDaily = isDailyModeActive();
+  const todayRecord = isDaily ? getTodayDailyRecord() : null;
 
   document.getElementById('result-emoji').textContent = won ? '🎉' : '😔';
-  document.getElementById('result-title').textContent = won ? t('decoded') : t('gameOver');
-  document.getElementById('result-subtitle').textContent = won
-    ? t('crackedLevel', stageLvl)
-    : t('theCodeWas');
+  document.getElementById('result-title').textContent = isDaily
+    ? (won ? t('dailySolved') : t('dailyFailed'))
+    : (won ? t('decoded') : t('gameOver'));
+  document.getElementById('result-subtitle').textContent = isDaily
+    ? (won
+      ? `${t('dailyBadge')} • +${todayRecord?.points || 0}`
+      : `${t('dailyBadge')} • ${t('dailyTryTomorrow')}`)
+    : (won ? t('crackedLevel', stageLvl) : t('theCodeWas'));
 
   const answerEl = document.getElementById('result-answer');
   answerEl.innerHTML = '';
@@ -2588,7 +2791,9 @@ function showResult(won) {
 
   const nextBtn = document.getElementById('btn-next');
   nextBtn.style.display = '';
-  if (won && state.currentLevel < LEVELS.length) {
+  if (isDaily) {
+    nextBtn.textContent = t('dailyDone');
+  } else if (won && state.currentLevel < LEVELS.length) {
     nextBtn.textContent = t('nextLevel');
   } else if (won) {
     nextBtn.textContent = t('playAgain');
@@ -2596,7 +2801,7 @@ function showResult(won) {
     nextBtn.textContent = t('tryAgain');
   }
 
-  document.getElementById('btn-levels').textContent = t('allLevels');
+  document.getElementById('btn-levels').textContent = isDaily ? t('play') : t('allLevels');
   showScreen('result-screen');
   protectScreenFromTapThrough('result-screen', ['btn-next', 'btn-levels'], 700);
 }
@@ -2605,6 +2810,7 @@ function showResult(won) {
 function init() {
   loadProgress();
   loadScoreState();
+  loadDailyState();
   applyLang();
   initHome();
   initPvpMvp();
@@ -2618,6 +2824,11 @@ function init() {
       await leavePvpSession();
       document.getElementById('pvp-room-status').style.display = 'none';
       showScreen('pvp-screen');
+      return;
+    }
+    if (isDailyModeActive()) {
+      clearDailyActiveSession();
+      showScreen('home-screen');
       return;
     }
     renderLevelSelect();
@@ -2661,6 +2872,11 @@ function init() {
       })();
       return;
     }
+    if (isDailyModeActive()) {
+      clearDailyActiveSession();
+      showScreen('home-screen');
+      return;
+    }
     const cfg = LEVELS[state.currentLevel - 1];
     const won = state.history.length > 0 &&
       state.history[state.history.length - 1].correct === cfg.colors;
@@ -2683,6 +2899,11 @@ function init() {
       await leavePvpSession({ fromMatchEnd: true });
       document.getElementById('pvp-room-status').style.display = 'none';
       showScreen('pvp-screen');
+      return;
+    }
+    if (isDailyModeActive()) {
+      clearDailyActiveSession();
+      showScreen('home-screen');
       return;
     }
     renderLevelSelect();
