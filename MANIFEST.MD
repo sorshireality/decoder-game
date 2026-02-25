@@ -47,12 +47,13 @@
 
 1. `home-screen`
 2. `leaderboard-screen` (глобальный рейтинг `Top 10` по `rating_score`)
-3. `pvp-screen` (MVP лобби: connection status + Create/Join/Find Match)
+3. `pvp-screen` (MVP PvP-лобби: упрощенный вход `Find Match` / `Create`, create/join/search/wait panels)
 4. `level-screen`
 5. `game-screen` (single-player и PvP, с PvP competition overlay в правом верхнем углу)
-6. `pvp-round-screen` (быстрый экран между раундами PvP: `Next/Retry`)
-7. `result-screen` (solo result + финальный PvP `Victory/Defeat`)
-8. `toast` (overlay-уведомления)
+6. `pvp-vs-screen` (pre-match экран синхронизации/представления игроков перед стартом дуэли)
+7. `pvp-round-screen` (быстрый экран между раундами PvP: `Next/Retry`)
+8. `result-screen` (solo result + финальный PvP `Victory/Defeat`)
+9. `toast` (overlay-уведомления)
 
 ## Геймплей (текущая реализация)
 
@@ -140,6 +141,7 @@ Stage 1/2 поведение сохранено. Stage 3 уже использу
 - `hasAbility`
 - `abilityAvailable`
 - `revealedPositions`
+- `awardedMainLevels` (локальный список уровней, за которые уже выданы очки Main Game; нужен для защиты от фарма рейтинга перепрохождением)
 
 ## Навигация и UX
 
@@ -164,8 +166,9 @@ PvP UX (текущее состояние):
   - используется быстрый `pvp-round-screen` с `Next` / `Retry`
 - Финал матча показывает `Victory/Defeat` через `result-screen` с кнопкой возврата в PvP.
 - PvP-лобби упрощено:
-  - главный экран PvP с 2 кнопками: `Создать` / `Подключиться`
+  - главный экран PvP с 2 кнопками: `Поиск матча` / `Создать`
   - отдельные вложенные подэкраны (в рамках `pvp-screen`) для create/join flow
+- На главном экране PvP скрыты `Google login/logout` и `Change Nick` (они не участвуют в основном дуэльном UX; Google-вход остается на `home-screen`, ник задается модалкой при входе в PvP при отсутствии).
 - При первом входе в PvP (если нет сохраненного ника) показывается модальное окно с предложением добавить никнейм.
 - Никнейм пока хранится локально в `localStorage` (без записи в БД) и используется в PvP UI для отображения локального игрока.
 - Блок `Connection` убран из контента PvP-экрана; вместо него статус подключения показывается компактным цветным chip в правом верхнем углу header.
@@ -218,9 +221,12 @@ PvP UX (текущее состояние):
 - Локальный никнейм используется как fallback и для PvP UI; при create/join в PvP пишется в `room_players.nickname` (после применения SQL миграции).
 - Main Game очки (MVP):
   - начисляются за победу в solo-уровне
+  - начисляются **только за первое прохождение конкретного уровня** (`first clear`)
+  - перепрохождение уровня не добавляет рейтинг/очки повторно
   - формула: `stage base points * level coefficient`
   - отображаются на `home-screen`
   - синхронизируются в `player_scores.main_game_score` и `player_scores.rating_score` при наличии Google-аккаунта
+  - защита от повторной выдачи для Main Game сейчас хранится локально в `decoder_progress.awardedMainLevels` (MVP)
 - Глобальный рейтинг (MVP):
   - отдельный экран `leaderboard-screen`
   - `Top 10` по `player_scores.rating_score`
@@ -242,9 +248,14 @@ PvP UX (текущее состояние):
 - После перезагрузки страницы PvP-сессия комнаты восстанавливается из `localStorage` и подтягивается из БД.
 - Есть базовый PvP match-loop на скорость:
   - прогресс по победам (`best of`)
+  - pre-match `VS` экран перед стартом матча (показывает локального игрока и соперника, плюс рейтинг если доступен)
   - быстрый переход `Next/Retry`
   - финальный `Victory/Defeat`
 - Пока нет синхронизации попыток/истории соперника внутри игрового поля (только прогресс/счет).
+- PvP очки (MVP) начисляются в `player_scores.pvp_score` и общий `rating_score` при финале матча:
+  - победа: `+20`
+  - поражение: `+5`
+  - начисление защищено от дублей на повторных realtime-обновлениях/повторном показе результата
 - Для пользователя Supabase-конфиг должен приходить через `Vercel /api/config`.
 - На PvP-экране оставлен скрытый `Dev Config (fallback)` для локальной отладки.
 

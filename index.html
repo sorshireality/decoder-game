@@ -59,14 +59,14 @@
     <div id="pvp-menu-panel" class="pvp-panel">
       <h3 id="pvp-menu-title" class="pvp-panel-title">Duel</h3>
       <div id="pvp-player-meta" class="pvp-meta"></div>
-      <div id="pvp-auth-meta" class="pvp-meta"></div>
-      <div class="pvp-auth-actions">
+      <div id="pvp-auth-meta" class="pvp-meta" style="display:none"></div>
+      <div class="pvp-auth-actions" style="display:none">
         <button id="btn-auth-google" class="btn-secondary pvp-auth-btn">Google Sign In</button>
         <button id="btn-auth-logout" class="btn-secondary pvp-auth-btn" style="display:none">Sign Out</button>
         <button id="btn-edit-nickname" class="btn-secondary pvp-auth-btn">Change Nick</button>
       </div>
-      <button id="btn-pvp-open-create" class="btn-primary pvp-btn">Create Room</button>
-      <button id="btn-pvp-open-join" class="btn-secondary pvp-btn">Join Room</button>
+      <button id="btn-pvp-open-join" class="btn-primary pvp-btn">Find Match</button>
+      <button id="btn-pvp-open-create" class="btn-secondary pvp-btn">Create Room</button>
     </div>
 
     <div id="pvp-create-panel" class="pvp-panel" style="display:none">
@@ -223,6 +223,24 @@
     <button id="btn-ability" class="btn-ability" style="display:none"></button>
     <button id="btn-confirm" class="btn-confirm" disabled></button>
     <button id="btn-pvp-leave" class="btn-secondary pvp-leave-btn" style="display:none">Leave PVP</button>
+  </div>
+
+  <!-- PVP ROUND SCREEN -->
+  <div id="pvp-vs-screen" class="screen">
+    <div class="pvp-vs-card">
+      <div class="pvp-vs-side">
+        <div id="pvp-vs-me-name" class="pvp-vs-name">You</div>
+        <div id="pvp-vs-me-rating" class="pvp-vs-rating">Rating: -</div>
+      </div>
+      <div class="pvp-vs-center">
+        <div class="pvp-vs-title">VS</div>
+        <div id="pvp-vs-subtitle" class="pvp-vs-subtitle">Preparing match…</div>
+      </div>
+      <div class="pvp-vs-side">
+        <div id="pvp-vs-opp-name" class="pvp-vs-name">Opponent</div>
+        <div id="pvp-vs-opp-rating" class="pvp-vs-rating">Rating: -</div>
+      </div>
+    </div>
   </div>
 
   <!-- PVP ROUND SCREEN -->

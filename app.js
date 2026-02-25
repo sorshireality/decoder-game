@@ -117,6 +117,7 @@ const I18N = {
     pvpTitle:         'Duel',
     pvpConnection:    'Connection',
     pvpMenuTitle:     'Duel',
+    pvpFindMatchCta:  'Find Match',
     pvpCreate:        'Create',
     pvpJoin:          'Join',
     pvpCreateRoom:    'Create Room',
@@ -184,6 +185,8 @@ const I18N = {
     pvpRoundLost:     'Round failed',
     pvpRoundKeepGoing:'Keep going',
     pvpRoundRetryFast:'Retry same round fast',
+    pvpVsPreparing:   'Preparing match…',
+    pvpVsRating:      n => `Rating: ${n ?? '-'}`,
     pvpNext:          'Next',
     pvpRetry:         'Retry',
     pvpVictory:       'Victory',
@@ -226,6 +229,7 @@ const I18N = {
     pvpTitle:         'Поєдинок',
     pvpConnection:    'Підключення',
     pvpMenuTitle:     'Поєдинок',
+    pvpFindMatchCta:  'Пошук матчу',
     pvpCreate:        'Створити',
     pvpJoin:          'Приєднатись',
     pvpCreateRoom:    'Створити кімнату',
@@ -293,6 +297,8 @@ const I18N = {
     pvpRoundLost:     'Раунд програно',
     pvpRoundKeepGoing:'Продовжуй',
     pvpRoundRetryFast:'Швидко повторити раунд',
+    pvpVsPreparing:   'Підготовка матчу…',
+    pvpVsRating:      n => `Рейтинг: ${n ?? '-'}`,
     pvpNext:          'Далі',
     pvpRetry:         'Повторити',
     pvpVictory:       'Перемога',
@@ -350,6 +356,7 @@ let state = {
   hasAbility:         false,
   abilityAvailable:   false,
   revealedPositions:  [],   // [{index, colorId}]
+  awardedMainLevels:  [],
 };
 
 let currentScreen = 'home-screen';
@@ -366,6 +373,11 @@ let pvpState = {
   finalResult: null,
   myName: null,
   opponentName: null,
+  myRating: null,
+  opponentRating: null,
+  matchRewardGranted: false,
+  introShownForMatch: false,
+  vsTimer: null,
 };
 let pvpMatch = {
   hostWins: 0,
@@ -410,6 +422,7 @@ function saveProgress() {
   localStorage.setItem(STORAGE_KEYS.progress, JSON.stringify({
     unlockedLevel: state.unlockedLevel,
     hasAbility:    state.hasAbility,
+    awardedMainLevels: Array.isArray(state.awardedMainLevels) ? state.awardedMainLevels : [],
     lang,
   }));
 }
@@ -424,9 +437,30 @@ function loadProgress() {
         if (state.unlockedLevel > ABILITY_UNLOCK_LEVEL) state.hasAbility = true;
       }
       if (d.hasAbility) state.hasAbility = true;
+      if (Array.isArray(d.awardedMainLevels)) {
+        state.awardedMainLevels = d.awardedMainLevels
+          .map(n => Number(n))
+          .filter(n => Number.isInteger(n) && n >= 1 && n <= LEVELS.length);
+      } else {
+        // Legacy save migration: treat already unlocked cleared levels as already rewarded.
+        state.awardedMainLevels = Array.from({ length: Math.max(0, state.unlockedLevel - 1) }, (_, i) => i + 1);
+      }
       if (d.lang && I18N[d.lang]) lang = d.lang;
     }
   } catch (_) {}
+}
+
+function hasAwardedMainLevel(level) {
+  return Array.isArray(state.awardedMainLevels) && state.awardedMainLevels.includes(level);
+}
+
+function markAwardedMainLevel(level) {
+  if (!Number.isInteger(level) || level < 1) return false;
+  if (!Array.isArray(state.awardedMainLevels)) state.awardedMainLevels = [];
+  if (state.awardedMainLevels.includes(level)) return false;
+  state.awardedMainLevels.push(level);
+  state.awardedMainLevels.sort((a, b) => a - b);
+  return true;
 }
 
 function saveScoreState() {
@@ -610,6 +644,33 @@ async function addMainGamePoints(points) {
   }
 }
 
+async function addPvpMatchPoints(won) {
+  const points = won ? 20 : 5;
+  if (authState.user) {
+    try {
+      const sb = getSupabaseClient();
+      const { data: cloud } = await sb.from('player_scores').select('*').eq('user_id', authState.user.id).maybeSingle();
+      const nextMain = Number(cloud?.main_game_score || 0);
+      const nextDaily = Number(cloud?.daily_score || 0);
+      const nextPvp = Number(cloud?.pvp_score || 0) + points;
+      await sb.from('player_scores').upsert({
+        user_id: authState.user.id,
+        main_game_score: nextMain,
+        daily_score: nextDaily,
+        pvp_score: nextPvp,
+        rating_score: nextMain + nextDaily + nextPvp,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (_) {}
+  }
+}
+
+function awardPvpMatchPointsOnce(won) {
+  if (pvpState.matchRewardGranted) return;
+  pvpState.matchRewardGranted = true;
+  addPvpMatchPoints(won).catch(() => {});
+}
+
 // ---- HELPERS ----
 function shuffle(arr) {
   const a = [...arr];
@@ -764,6 +825,18 @@ function updatePvpPlayerMeta() {
   if (!meta) return;
   const nick = getNickname() || getGuestPlayerId();
   meta.textContent = t('pvpPlayerLabel', nick);
+}
+
+async function fetchScoresByUserIds(userIds) {
+  const ids = (userIds || []).filter(Boolean);
+  if (!ids.length) return [];
+  const sb = getSupabaseClient();
+  const { data, error } = await sb
+    .from('player_scores')
+    .select('user_id,rating_score')
+    .in('user_id', ids);
+  if (error) throw error;
+  return data || [];
 }
 
 function showNicknameModal() {
@@ -1079,6 +1152,33 @@ function getPvpLevelFromRoom(room) {
   return idx >= 0 ? idx + 1 : null;
 }
 
+function renderPvpVsScreen() {
+  const meName = (pvpState.myName || getCurrentPlayerNickname() || (isPvpRoleHost() ? t('pvpRoleHost') : t('pvpRoleGuest'))).slice(0, 16);
+  const oppName = (pvpState.opponentName || (isPvpRoleHost() ? t('pvpRoleGuest') : t('pvpRoleHost'))).slice(0, 16);
+  document.getElementById('pvp-vs-me-name').textContent = meName;
+  document.getElementById('pvp-vs-opp-name').textContent = oppName;
+  document.getElementById('pvp-vs-me-rating').textContent = t('pvpVsRating', pvpState.myRating);
+  document.getElementById('pvp-vs-opp-rating').textContent = t('pvpVsRating', pvpState.opponentRating);
+  document.getElementById('pvp-vs-subtitle').textContent = t('pvpVsPreparing');
+}
+
+function schedulePvpMatchIntroStart(room, lvl) {
+  if (pvpState.vsTimer) {
+    clearTimeout(pvpState.vsTimer);
+    pvpState.vsTimer = null;
+  }
+  pvpState.introShownForMatch = true;
+  renderPvpVsScreen();
+  showScreen('pvp-vs-screen');
+  pvpState.vsTimer = setTimeout(() => {
+    pvpState.vsTimer = null;
+    if (!isPvpModeActive() || pvpState.status !== 'ready') return;
+    pvpState.localRoundStarted = true;
+    showToast(`Match ready • ${room.room_code}`, 1800);
+    startLevel(lvl);
+  }, 1200);
+}
+
 function maybeStartLocalPvpRound(room) {
   if (!room || room.status !== 'ready') return;
   if (pvpState.localRoundStarted) return;
@@ -1086,6 +1186,11 @@ function maybeStartLocalPvpRound(room) {
   const lvl = getPvpLevelFromRoom(room);
   if (!lvl) {
     showToast('No matching level preset for room settings', 3000);
+    return;
+  }
+  const isFreshMatchIntro = !pvpState.introShownForMatch && getMyPvpWins() === 0 && getOpponentPvpWins() === 0;
+  if (isFreshMatchIntro) {
+    schedulePvpMatchIntroStart(room, lvl);
     return;
   }
   pvpState.localRoundStarted = true;
@@ -1142,7 +1247,7 @@ async function fetchRoomPlayers(roomId) {
   const sb = getSupabaseClient();
   const { data, error } = await sb
     .from('room_players')
-    .select('player_id, role, nickname')
+    .select('player_id, user_id, role, nickname')
     .eq('room_id', roomId);
   if (error) throw error;
   return data || [];
@@ -1156,6 +1261,10 @@ async function refreshPvpNames() {
     const opp = players.find(p => p.role && p.role !== pvpState.role);
     pvpState.myName = me?.nickname || getCurrentPlayerNickname() || null;
     pvpState.opponentName = opp?.nickname || null;
+    const scores = await fetchScoresByUserIds([me?.user_id, opp?.user_id]);
+    const byUserId = new Map(scores.map(s => [s.user_id, Number(s.rating_score || 0)]));
+    pvpState.myRating = me?.user_id ? (byUserId.get(me.user_id) ?? 0) : null;
+    pvpState.opponentRating = opp?.user_id ? (byUserId.get(opp.user_id) ?? 0) : null;
     updatePvpCompetitionUi();
   } catch (_) {}
 }
@@ -1298,6 +1407,7 @@ function showPvpRoundScreen(kind) {
 }
 
 function showPvpFinalResult(won) {
+  awardPvpMatchPointsOnce(won);
   pvpState.finalResult = won ? 'win' : 'lose';
   document.getElementById('result-emoji').textContent = won ? '🏆' : '😞';
   document.getElementById('result-title').textContent = won ? t('pvpVictory') : t('pvpDefeat');
@@ -1317,6 +1427,7 @@ function showPvpFinalResult(won) {
 
 function resetPvpStateLocal() {
   stopPvpWatchers();
+  if (pvpState.vsTimer) clearTimeout(pvpState.vsTimer);
   pvpState = {
     roomId: null,
     roomCode: null,
@@ -1330,6 +1441,11 @@ function resetPvpStateLocal() {
     finalResult: null,
     myName: null,
     opponentName: null,
+    myRating: null,
+    opponentRating: null,
+    matchRewardGranted: false,
+    introShownForMatch: false,
+    vsTimer: null,
   };
   pvpMatch = {
     hostWins: 0,
@@ -1502,6 +1618,12 @@ function resetLocalPvpMatchForRematch() {
   pvpState.finalResult = null;
   pvpState.pendingRoundResult = null;
   pvpState.localRoundStarted = false;
+  pvpState.matchRewardGranted = false;
+  pvpState.introShownForMatch = false;
+  if (pvpState.vsTimer) {
+    clearTimeout(pvpState.vsTimer);
+    pvpState.vsTimer = null;
+  }
   pvpMatch.hostWins = 0;
   pvpMatch.guestWins = 0;
   pvpMatch.hostCorrectCount = 0;
@@ -1633,7 +1755,7 @@ function applyLang() {
   setText('pvp-title', 'pvpTitle');
   setText('pvp-menu-title', 'pvpMenuTitle');
   setText('btn-pvp-open-create', 'pvpCreate');
-  setText('btn-pvp-open-join', 'pvpJoin');
+  setText('btn-pvp-open-join', 'pvpFindMatchCta');
   setText('btn-auth-google', 'authGoogleIn');
   setText('btn-auth-logout', 'authSignOut');
   setText('btn-edit-nickname', 'nickChange');
@@ -1657,6 +1779,9 @@ function applyLang() {
   setText('btn-pvp-search-code', 'pvpJoinByCode');
   setText('btn-pvp-created-cancel', 'pvpCancel');
   setText('pvp-created-code-label', 'pvpCodeLabel');
+  const vsSub = document.getElementById('pvp-vs-subtitle');
+  if (vsSub) vsSub.textContent = t('pvpVsPreparing');
+  if (currentScreen === 'pvp-vs-screen') renderPvpVsScreen();
   setText('btn-pvp-leave', 'pvpLeave');
   setText('btn-pvp-round-back', 'pvpBackToPvp');
   setText('btn-leaderboard', 'leaderboard');
@@ -1866,6 +1991,11 @@ async function createRoomMvpWithSettings({ mode, bestOf, colorsCount }, options 
     localRoundStarted: false,
     myName: getCurrentPlayerNickname() || null,
     opponentName: null,
+    myRating: null,
+    opponentRating: null,
+    matchRewardGranted: false,
+    introShownForMatch: false,
+    vsTimer: null,
   };
   applyRoomToPvpState(room, 'host');
   updatePvpCreatedPanel();
@@ -1929,6 +2059,11 @@ async function joinRoomRecordMvp(room) {
     localRoundStarted: false,
     myName: getCurrentPlayerNickname() || null,
     opponentName: null,
+    myRating: null,
+    opponentRating: null,
+    matchRewardGranted: false,
+    introShownForMatch: false,
+    vsTimer: null,
   };
   applyRoomToPvpState(claimedRoom, 'guest');
   setPvpLobbyView('status');
@@ -2409,7 +2544,8 @@ async function onConfirm() {
       saveProgress();
     }
 
-    if (won) {
+    if (won && markAwardedMainLevel(state.currentLevel)) {
+      saveProgress();
       addMainGamePoints(calculateMainGamePoints(state.currentLevel));
     }
 
