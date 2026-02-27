@@ -153,6 +153,8 @@ const LEVEL_STAGE_SUMMARY_V2 = LEVELS_V2.reduce((acc, lvl) => {
 const ABILITY_UNLOCK_LEVEL = 6;
 const STAGE1_COUNT = 10;
 const MATCHMAKING_ROOM_TTL_MS = 10 * 60 * 1000;
+const PVP_VS_DURATION_MS = 2800;
+const PVP_VS_TICK_MS = 100;
 const STORAGE_KEYS = {
   progress: 'decoder_progress',
   score: 'decoder_score_state',
@@ -194,6 +196,7 @@ const I18N = {
     pvpBestOf:        'Match Format',
     pvpModeClassic:   'Classic',
     pvpModePlusOne:   '+1 Decoy',
+    pvpModeFog:       'Fog',
     pvpBestOfHint:    n => `First to ${Math.floor(n / 2) + 1} wins`,
     pvpRoomCodePh:    'ROOM CODE',
     pvpConnectionChecking: 'Checking connection…',
@@ -253,6 +256,7 @@ const I18N = {
     pvpRoundKeepGoing:'Keep going',
     pvpRoundRetryFast:'Retry same round fast',
     pvpVsPreparing:   'Preparing match…',
+    pvpVsStartingIn:  s => `Starting in ${s}s`,
     pvpVsRating:      n => `Rating: ${n ?? '-'}`,
     pvpNext:          'Next',
     pvpRetry:         'Retry',
@@ -319,6 +323,7 @@ const I18N = {
     pvpBestOf:        'Формат матчу',
     pvpModeClassic:   'Класичний',
     pvpModePlusOne:   '+1 зайвий',
+    pvpModeFog:       'Туман',
     pvpBestOfHint:    n => `До ${Math.floor(n / 2) + 1} перемог`,
     pvpRoomCodePh:    'КОД КІМНАТИ',
     pvpConnectionChecking: 'Перевірка підключення…',
@@ -378,6 +383,7 @@ const I18N = {
     pvpRoundKeepGoing:'Продовжуй',
     pvpRoundRetryFast:'Швидко повторити раунд',
     pvpVsPreparing:   'Підготовка матчу…',
+    pvpVsStartingIn:  s => `Початок через ${s} с`,
     pvpVsRating:      n => `Рейтинг: ${n ?? '-'}`,
     pvpNext:          'Далі',
     pvpRetry:         'Повторити',
@@ -463,8 +469,10 @@ let pvpState = {
   matchRewardGranted: false,
   introShownForMatch: false,
   vsTimer: null,
+  vsCountdownTimer: null,
 };
 let pvpMatch = {
+  currentRound: 1,
   hostWins: 0,
   guestWins: 0,
   hostCorrectCount: 0,
@@ -1086,7 +1094,11 @@ function updatePvpCreatedPanel() {
   const infoEl = document.getElementById('pvp-created-match-info');
   if (!codeEl || !infoEl) return;
   codeEl.textContent = (pvpState.roomCode || '------').toUpperCase();
-  const modeLabel = pvpState.mode === 'plus_one' ? t('pvpModePlusOne') : t('pvpModeClassic');
+  const modeLabel = pvpState.mode === 'plus_one'
+    ? t('pvpModePlusOne')
+    : pvpState.mode === 'fog'
+      ? t('pvpModeFog')
+      : t('pvpModeClassic');
   infoEl.textContent = pvpState.bestOf && pvpState.colorsCount
     ? t('pvpCreateWaitingInfo', modeLabel, pvpState.bestOf, pvpState.colorsCount)
     : '';
@@ -1499,12 +1511,45 @@ function stopPvpWatchers() {
 }
 
 function getPvpLevelFromRoom(room) {
-  const targetStage = room.mode === 'plus_one' ? 2 : 1;
+  const targetStage = room.mode === 'plus_one' ? 2 : (
+    room.mode === 'fog' ? 4 : 1
+  );
   const idx = LEVELS.findIndex(cfg => cfg.stage === targetStage && cfg.colors === room.colors_count);
   return idx >= 0 ? idx + 1 : null;
 }
 
-function renderPvpVsScreen() {
+function generatePvpSharedSecret(room, cfg, featureConfig = {}) {
+  const round = Number(pvpMatch.currentRound || 1);
+  const seed = `pvp:${room.id}:${round}:${room.mode}:${room.colors_count}:${cfg.paletteColors}:${featureConfig.allowDuplicates ? 'dup' : 'uniq'}`;
+  const rng = seededRngFromString(seed);
+  const palette = COLORS.slice(0, cfg.paletteColors).map(c => c.id);
+  if (featureConfig.allowDuplicates) {
+    const secret = [];
+    for (let i = 0; i < cfg.colors; i++) {
+      secret.push(palette[Math.floor(rng() * palette.length)]);
+    }
+    return secret;
+  }
+  const shuffled = [...palette];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled.slice(0, cfg.colors);
+}
+
+function stopPvpVsTimers() {
+  if (pvpState.vsTimer) {
+    clearTimeout(pvpState.vsTimer);
+    pvpState.vsTimer = null;
+  }
+  if (pvpState.vsCountdownTimer) {
+    clearInterval(pvpState.vsCountdownTimer);
+    pvpState.vsCountdownTimer = null;
+  }
+}
+
+function renderPvpVsScreen(remainingMs = PVP_VS_DURATION_MS) {
   const meName = (pvpState.myName || getCurrentPlayerNickname() || (isPvpRoleHost() ? t('pvpRoleHost') : t('pvpRoleGuest'))).slice(0, 16);
   const oppName = (pvpState.opponentName || (isPvpRoleHost() ? t('pvpRoleGuest') : t('pvpRoleHost'))).slice(0, 16);
   document.getElementById('pvp-vs-me-name').textContent = meName;
@@ -1512,23 +1557,38 @@ function renderPvpVsScreen() {
   document.getElementById('pvp-vs-me-rating').textContent = t('pvpVsRating', pvpState.myRating);
   document.getElementById('pvp-vs-opp-rating').textContent = t('pvpVsRating', pvpState.opponentRating);
   document.getElementById('pvp-vs-subtitle').textContent = t('pvpVsPreparing');
+  const countdownSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+  const countdownEl = document.getElementById('pvp-vs-countdown');
+  if (countdownEl) countdownEl.textContent = t('pvpVsStartingIn', countdownSeconds);
+  const progressEl = document.getElementById('pvp-vs-progress-fill');
+  if (progressEl) {
+    const progress = Math.min(1, Math.max(0, (PVP_VS_DURATION_MS - remainingMs) / PVP_VS_DURATION_MS));
+    progressEl.style.width = `${Math.round(progress * 100)}%`;
+  }
 }
 
 function schedulePvpMatchIntroStart(room, lvl) {
-  if (pvpState.vsTimer) {
-    clearTimeout(pvpState.vsTimer);
-    pvpState.vsTimer = null;
-  }
+  stopPvpVsTimers();
   pvpState.introShownForMatch = true;
-  renderPvpVsScreen();
+  const introStartedAt = Date.now();
+  renderPvpVsScreen(PVP_VS_DURATION_MS);
   showScreen('pvp-vs-screen');
+  pvpState.vsCountdownTimer = setInterval(() => {
+    const elapsed = Date.now() - introStartedAt;
+    const remaining = Math.max(0, PVP_VS_DURATION_MS - elapsed);
+    renderPvpVsScreen(remaining);
+    if (remaining <= 0) {
+      clearInterval(pvpState.vsCountdownTimer);
+      pvpState.vsCountdownTimer = null;
+    }
+  }, PVP_VS_TICK_MS);
   pvpState.vsTimer = setTimeout(() => {
-    pvpState.vsTimer = null;
+    stopPvpVsTimers();
     if (!isPvpModeActive() || pvpState.status !== 'ready') return;
     pvpState.localRoundStarted = true;
     showToast(`Match ready • ${room.room_code}`, 1800);
     startLevel(lvl);
-  }, 1200);
+  }, PVP_VS_DURATION_MS);
 }
 
 function maybeStartLocalPvpRound(room) {
@@ -1540,8 +1600,8 @@ function maybeStartLocalPvpRound(room) {
     showToast('No matching level preset for room settings', 3000);
     return;
   }
-  const isFreshMatchIntro = !pvpState.introShownForMatch && getMyPvpWins() === 0 && getOpponentPvpWins() === 0;
-  if (isFreshMatchIntro) {
+  const shouldShowMatchIntro = !pvpState.introShownForMatch && Number(pvpMatch.currentRound || 1) === 1;
+  if (shouldShowMatchIntro) {
     schedulePvpMatchIntroStart(room, lvl);
     return;
   }
@@ -1779,7 +1839,7 @@ function showPvpFinalResult(won) {
 
 function resetPvpStateLocal() {
   stopPvpWatchers();
-  if (pvpState.vsTimer) clearTimeout(pvpState.vsTimer);
+  stopPvpVsTimers();
   pvpState = {
     roomId: null,
     roomCode: null,
@@ -1798,8 +1858,10 @@ function resetPvpStateLocal() {
     matchRewardGranted: false,
     introShownForMatch: false,
     vsTimer: null,
+    vsCountdownTimer: null,
   };
   pvpMatch = {
+    currentRound: 1,
     hostWins: 0,
     guestWins: 0,
     hostCorrectCount: 0,
@@ -1856,6 +1918,7 @@ async function fetchMatchStateByRoomId(roomId) {
 
 function applyMatchStateToPvp(matchState) {
   if (!matchState) return;
+  pvpMatch.currentRound = matchState.current_round || 1;
   pvpMatch.hostWins = matchState.host_round_wins || 0;
   pvpMatch.guestWins = matchState.guest_round_wins || 0;
   pvpMatch.hostCorrectCount = matchState.host_correct_count || 0;
@@ -1972,10 +2035,8 @@ function resetLocalPvpMatchForRematch() {
   pvpState.localRoundStarted = false;
   pvpState.matchRewardGranted = false;
   pvpState.introShownForMatch = false;
-  if (pvpState.vsTimer) {
-    clearTimeout(pvpState.vsTimer);
-    pvpState.vsTimer = null;
-  }
+  stopPvpVsTimers();
+  pvpMatch.currentRound = 1;
   pvpMatch.hostWins = 0;
   pvpMatch.guestWins = 0;
   pvpMatch.hostCorrectCount = 0;
@@ -2001,6 +2062,7 @@ async function addPvpWinAndAdvance() {
   const winsNeeded = getPvpWinsNeeded();
 
   const patch = {
+    current_round: nextWins >= winsNeeded ? (matchState.current_round || 1) : ((matchState.current_round || 1) + 1),
     [myWinField]: nextWins,
     [myCorrectField]: 0,
     round_status: nextWins >= winsNeeded ? 'finished' : 'waiting',
@@ -2064,6 +2126,8 @@ function renderPvpStatus(info) {
     ? t('pvpModeClassic')
     : info.mode === 'plus_one'
       ? t('pvpModePlusOne')
+      : info.mode === 'fog'
+        ? t('pvpModeFog')
       : (info.mode || '-');
   box.innerHTML = `
     <h3 class="pvp-panel-title">${t('pvpJoinRoom')}</h3>
@@ -2148,8 +2212,10 @@ function applyLang() {
   if (modeSelect) {
     const classicOpt = modeSelect.querySelector('option[value="classic"]');
     const plusOneOpt = modeSelect.querySelector('option[value="plus_one"]');
+    const fogOpt = modeSelect.querySelector('option[value="fog"]');
     if (classicOpt) classicOpt.textContent = t('pvpModeClassic');
     if (plusOneOpt) plusOneOpt.textContent = t('pvpModePlusOne');
+    if (fogOpt) fogOpt.textContent = t('pvpModeFog');
   }
   const findModeSelect = document.getElementById('pvp-find-mode-select');
   if (findModeSelect) {
@@ -2164,8 +2230,10 @@ function applyLang() {
     if (id === 'pvp-find-rule-mode') {
       const classicOpt = sel.querySelector('option[value="classic"]');
       const plusOneOpt = sel.querySelector('option[value="plus_one"]');
+      const fogOpt = sel.querySelector('option[value="fog"]');
       if (classicOpt) classicOpt.textContent = t('pvpModeClassic');
       if (plusOneOpt) plusOneOpt.textContent = t('pvpModePlusOne');
+      if (fogOpt) fogOpt.textContent = t('pvpModeFog');
     } else if (id === 'pvp-find-rule-bestof') {
       ['1', '3', '5'].forEach(v => {
         const opt = sel.querySelector(`option[value="${v}"]`);
@@ -2361,6 +2429,7 @@ async function createRoomMvpWithSettings({ mode, bestOf, colorsCount }, options 
     matchRewardGranted: false,
     introShownForMatch: false,
     vsTimer: null,
+    vsCountdownTimer: null,
   };
   applyRoomToPvpState(room, 'host');
   updatePvpCreatedPanel();
@@ -2429,6 +2498,7 @@ async function joinRoomRecordMvp(room) {
     matchRewardGranted: false,
     introShownForMatch: false,
     vsTimer: null,
+    vsCountdownTimer: null,
   };
   applyRoomToPvpState(claimedRoom, 'guest');
   setPvpLobbyView('status');
@@ -2725,6 +2795,11 @@ function startLevel(lvl) {
     setupChainRound(state.chain.roundIndex, cfg);
   }
   if (isPvpModeActive()) {
+    state.secret = generatePvpSharedSecret(
+      { id: pvpState.roomId, mode: pvpState.mode, colors_count: pvpState.colorsCount },
+      cfg,
+      lvlV2?.featureConfig || {}
+    );
     pvpState.localRoundStarted = true;
     pvpState.pendingRoundResult = null;
   }
@@ -2736,9 +2811,19 @@ function startLevel(lvl) {
 function renderGame() {
   const cfg = LEVELS[state.currentLevel - 1];
   const stageLvl = stageLvlNum(state.currentLevel);
-  let gameLabel = isDailyModeActive()
-    ? `${t('dailyBadge')} · ${t('levelHeader', cfg, stageLvl)}`
-    : t('levelHeader', cfg, stageLvl);
+  let gameLabel;
+  if (isPvpModeActive()) {
+    const modeLabel = pvpState.mode === 'plus_one'
+      ? t('pvpModePlusOne')
+      : pvpState.mode === 'fog'
+        ? t('pvpModeFog')
+        : t('pvpModeClassic');
+    gameLabel = `PVP · ${modeLabel} · ${cfg.colors}`;
+  } else if (isDailyModeActive()) {
+    gameLabel = `${t('dailyBadge')} · ${t('levelHeader', cfg, stageLvl)}`;
+  } else {
+    gameLabel = t('levelHeader', cfg, stageLvl);
+  }
   if (state.chain) {
     gameLabel += ` · Chain ${state.chain.roundIndex}/${state.chain.totalRounds}`;
   }

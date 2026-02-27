@@ -45,6 +45,12 @@ alter table public.match_state
 alter table public.match_state
   add column if not exists rematch_requested_by text;
 
+alter table public.rooms
+  drop constraint if exists rooms_mode_check;
+
+alter table public.rooms
+  add constraint rooms_mode_check check (mode in ('classic', 'plus_one', 'fog'));
+
 -- 5) updated_at trigger reuse
 create or replace function public.set_updated_at()
 returns trigger

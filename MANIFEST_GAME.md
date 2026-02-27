@@ -80,9 +80,13 @@ Feature multipliers:
 ## PvP (MVP)
 
 - Лобби: `Find Match` / `Create`.
+- Режимы в PvP: `classic`, `plus_one`, `fog`.
 - Matchmaking: `Any room` или `By settings`.
 - Автопоиск + fallback авто-создания комнаты.
 - Room flow: `waiting_for_opponent` -> `ready` -> матч.
 - Экран `VS` перед стартом.
+- Экран `VS` показывает ник/рейтинг обоих, countdown и progress bar (`~2.8s`) для синхронизации старта.
 - `Rematch` в той же комнате.
 - Пока без полной синхронизации попыток/истории соперника в поле.
+- Для честности сложности: секрет в PvP генерируется детерминированно от общего seed (`roomId + currentRound + mode + colors`), поэтому на каждом раунде у обоих игроков одинаковый код.
+- В PvP заголовке игры показывается `PVP · mode · colors` (без номера уровня main game).

@@ -78,6 +78,7 @@
       <select id="pvp-mode" class="input-control">
         <option value="classic">Classic</option>
         <option value="plus_one">+1 Decoy</option>
+        <option value="fog">Fog</option>
       </select>
 
       <label id="pvp-colors-label" class="pvp-label" for="pvp-colors">Colors</label>
@@ -114,6 +115,7 @@
         <select id="pvp-find-rule-mode" class="input-control">
           <option value="classic">Classic</option>
           <option value="plus_one">+1 Decoy</option>
+          <option value="fog">Fog</option>
         </select>
         <label id="pvp-find-rule-colors-label" class="pvp-label" for="pvp-find-rule-colors">Colors</label>
         <select id="pvp-find-rule-colors" class="input-control">
@@ -228,6 +230,10 @@
       <div class="pvp-vs-center">
         <div class="pvp-vs-title">VS</div>
         <div id="pvp-vs-subtitle" class="pvp-vs-subtitle">Preparing match…</div>
+        <div id="pvp-vs-countdown" class="pvp-vs-countdown">Starting in 3s</div>
+        <div class="pvp-vs-progress">
+          <div id="pvp-vs-progress-fill" class="pvp-vs-progress-fill"></div>
+        </div>
       </div>
       <div class="pvp-vs-side">
         <div id="pvp-vs-opp-name" class="pvp-vs-name">Opponent</div>
