@@ -110,52 +110,121 @@ drop policy if exists "scores_public_select" on public.player_scores;
 create policy "scores_public_select" on public.player_scores
 for select to anon, authenticated using (true);
 
--- PvP tables stay permissive for MVP guest/auth mixed mode (adjust later)
--- If not created earlier, these will fail; that's okay for existing setup only.
+-- PvP tables: strict participant-only access (auth-only PvP)
 alter table public.rooms enable row level security;
 alter table public.room_players enable row level security;
 alter table public.match_state enable row level security;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public' and tablename = 'room_players' and policyname = 'room_players_anon_all'
-  ) then
-    create policy "room_players_anon_all" on public.room_players
-    for all to anon using (true) with check (true);
-  end if;
-end $$;
+drop policy if exists "room_players_anon_all" on public.room_players;
+drop policy if exists "rooms_auth_all" on public.rooms;
+drop policy if exists "room_players_auth_all" on public.room_players;
+drop policy if exists "match_state_auth_all" on public.match_state;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public' and tablename = 'rooms' and policyname = 'rooms_auth_all'
-  ) then
-    create policy "rooms_auth_all" on public.rooms
-    for all to authenticated using (true) with check (true);
-  end if;
-end $$;
+-- ROOMS
+drop policy if exists "rooms_select_participant" on public.rooms;
+create policy "rooms_select_participant" on public.rooms
+for select to authenticated
+using (host_player_id = auth.uid()::text or guest_player_id = auth.uid()::text);
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public' and tablename = 'room_players' and policyname = 'room_players_auth_all'
-  ) then
-    create policy "room_players_auth_all" on public.room_players
-    for all to authenticated using (true) with check (true);
-  end if;
-end $$;
+drop policy if exists "rooms_insert_host_self" on public.rooms;
+create policy "rooms_insert_host_self" on public.rooms
+for insert to authenticated
+with check (host_player_id = auth.uid()::text and guest_player_id is null);
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public' and tablename = 'match_state' and policyname = 'match_state_auth_all'
-  ) then
-    create policy "match_state_auth_all" on public.match_state
-    for all to authenticated using (true) with check (true);
-  end if;
-end $$;
+drop policy if exists "rooms_update_participant" on public.rooms;
+create policy "rooms_update_participant" on public.rooms
+for update to authenticated
+using (host_player_id = auth.uid()::text or guest_player_id = auth.uid()::text)
+with check (host_player_id = auth.uid()::text or guest_player_id = auth.uid()::text);
+
+drop policy if exists "rooms_join_waiting_as_guest" on public.rooms;
+create policy "rooms_join_waiting_as_guest" on public.rooms
+for update to authenticated
+using (
+  status = 'waiting_for_opponent'
+  and guest_player_id is null
+  and host_player_id <> auth.uid()::text
+)
+with check (guest_player_id = auth.uid()::text);
+
+drop policy if exists "rooms_delete_host_only" on public.rooms;
+create policy "rooms_delete_host_only" on public.rooms
+for delete to authenticated
+using (host_player_id = auth.uid()::text);
+
+-- ROOM_PLAYERS
+drop policy if exists "room_players_select_participant" on public.room_players;
+create policy "room_players_select_participant" on public.room_players
+for select to authenticated
+using (
+  exists (
+    select 1 from public.rooms r
+    where r.id = room_players.room_id
+      and (r.host_player_id = auth.uid()::text or r.guest_player_id = auth.uid()::text)
+  )
+);
+
+drop policy if exists "room_players_insert_self" on public.room_players;
+create policy "room_players_insert_self" on public.room_players
+for insert to authenticated
+with check (
+  user_id = auth.uid()
+  and player_id = auth.uid()::text
+  and exists (
+    select 1 from public.rooms r
+    where r.id = room_players.room_id
+      and (r.host_player_id = auth.uid()::text or r.guest_player_id = auth.uid()::text)
+  )
+);
+
+drop policy if exists "room_players_update_self" on public.room_players;
+create policy "room_players_update_self" on public.room_players
+for update to authenticated
+using (user_id = auth.uid() and player_id = auth.uid()::text)
+with check (user_id = auth.uid() and player_id = auth.uid()::text);
+
+drop policy if exists "room_players_delete_self" on public.room_players;
+create policy "room_players_delete_self" on public.room_players
+for delete to authenticated
+using (user_id = auth.uid() and player_id = auth.uid()::text);
+
+-- MATCH_STATE
+drop policy if exists "match_state_select_participant" on public.match_state;
+create policy "match_state_select_participant" on public.match_state
+for select to authenticated
+using (
+  exists (
+    select 1 from public.rooms r
+    where r.id = match_state.room_id
+      and (r.host_player_id = auth.uid()::text or r.guest_player_id = auth.uid()::text)
+  )
+);
+
+drop policy if exists "match_state_insert_host_only" on public.match_state;
+create policy "match_state_insert_host_only" on public.match_state
+for insert to authenticated
+with check (
+  exists (
+    select 1 from public.rooms r
+    where r.id = match_state.room_id
+      and r.host_player_id = auth.uid()::text
+  )
+);
+
+drop policy if exists "match_state_update_participant" on public.match_state;
+create policy "match_state_update_participant" on public.match_state
+for update to authenticated
+using (
+  exists (
+    select 1 from public.rooms r
+    where r.id = match_state.room_id
+      and (r.host_player_id = auth.uid()::text or r.guest_player_id = auth.uid()::text)
+  )
+)
+with check (
+  exists (
+    select 1 from public.rooms r
+    where r.id = match_state.room_id
+      and (r.host_player_id = auth.uid()::text or r.guest_player_id = auth.uid()::text)
+  )
+);
