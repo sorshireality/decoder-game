@@ -132,6 +132,11 @@ create policy "rooms_select_participant" on public.rooms
 for select to authenticated
 using (host_player_id = auth.uid()::text or guest_player_id = auth.uid()::text);
 
+drop policy if exists "rooms_select_waiting_for_matchmaking" on public.rooms;
+create policy "rooms_select_waiting_for_matchmaking" on public.rooms
+for select to authenticated
+using (status = 'waiting_for_opponent' and guest_player_id is null);
+
 drop policy if exists "rooms_insert_host_self" on public.rooms;
 create policy "rooms_insert_host_self" on public.rooms
 for insert to authenticated

@@ -37,6 +37,7 @@
 - Supabase config: через `/api/config`.
 - UI `Dev Config` удален.
 - RLS для PvP таблиц должен быть strict participant-based (`rooms`, `room_players`, `match_state`).
+- Исключение для matchmaking: waiting rooms можно `select` authenticated-пользователям до входа в комнату, иначе `find match` и `join by code` не работают.
 
 ## Данные и хранение
 

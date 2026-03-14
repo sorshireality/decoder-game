@@ -13,6 +13,7 @@
 - В PvP введена детерминированная генерация общего секрета на раунд (оба игрока решают одинаковый код).
 - В PvP убран конфузный main-level label в заголовке игры (теперь `PVP · mode · colors`).
 - Улучшен `VS` экран перед стартом PvP: `~2.8s` countdown + progress bar, повторный показ на старте матча и после rematch.
+- Исправлен RLS для matchmaking: waiting rooms теперь доступны для authenticated discovery, чтобы снова работали `join by code` и `find match`.
 - Введена защита от фарма main-game очков (`first clear only`).
 - Введены feature multipliers для баланса очков.
 
